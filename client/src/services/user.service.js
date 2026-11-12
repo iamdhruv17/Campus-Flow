@@ -1,11 +1,12 @@
 import api from './api';
 
 export const userService = {
-  getAll: (params) => api.get('/users', { params }),
-  getById: (id) => api.get(`/users/${id}`),
-  create: (data) => api.post('/users', data),
-  update: (id, data) => api.put(`/users/${id}`, data),
-  toggleStatus: (id) => api.patch(`/users/${id}/status`),
+  getAll: (params) => api.get('/admin/users', { params }),
+  getById: (id) => api.get(`/admin/users/${id}`),
+  create: (data) => api.post('/admin/users', data),
+  update: (id, data) => api.put(`/admin/users/${id}`, data),
+  toggleStatus: (id) => api.patch(`/admin/users/${id}/status`),
+  getAdminStats: () => api.get('/admin/stats'),
   getProfile: () => api.get('/users/profile'),
   updateProfile: (data) => api.put('/users/profile', data),
 };

@@ -1,5 +1,5 @@
-import { CheckCircle2, Clock, XCircle, RotateCcw, ArrowRight, UserCheck } from 'lucide-react';
-import { APPROVAL_STAGES, MEDICAL_LEAVE_STAGES } from '../../utils/constants';
+import { CheckCircle2, Clock, XCircle, RotateCcw, UserCheck } from 'lucide-react';
+import { APPROVAL_STAGES } from '../../utils/constants';
 import { formatDateTime } from '../../utils/formatters';
 
 export default function ApprovalTimeline({ request, history = [] }) {

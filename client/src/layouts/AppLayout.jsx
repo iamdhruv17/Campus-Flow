@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, FileText, PlusCircle, Bell, User, LogOut,
-  Menu, X, ChevronDown, GraduationCap, Search,
+  Menu, X, GraduationCap,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ROLES } from '../utils/constants';

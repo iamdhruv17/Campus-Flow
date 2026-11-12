@@ -6,9 +6,9 @@
 
 ## 1. Project Overview
 
-**CampusFlow** is a comprehensive, production-ready web application built to digitize student administrative and academic requests. It replaces manual paper forms, physical signatures, and in-person faculty coordination with an automated, role-governed digital workflow.
+**CampusFlow** is a college-project MVP built to digitize student administrative and academic requests. It replaces manual paper forms and in-person coordination with an online request and review workflow.
 
-Students can submit requests online with supporting documentation, monitor approval stages in real time, view faculty remarks, and receive status notifications. Teachers, Class Coordinators, Mentors, Heads of Department (HODs), the Dean, and College Administrators have dedicated, role-aware dashboards with granular permissions to review, approve, reject, or return requests for student correction.
+Students can submit requests online with supporting documentation, monitor approval stages, view faculty remarks, and receive in-app notifications. Teachers, Class Coordinators, Mentors, Heads of Department (HODs), the Dean, and College Administrators have role-aware dashboards to review, approve, reject, or return requests for correction.
 
 **MongoDB Atlas** stores all application data and document metadata. **Cloudinary** stores actual uploaded document contents using authenticated (private) delivery — documents are never publicly accessible.
 
@@ -90,6 +90,7 @@ CampusFlow/
 │       │   ├── common/             # StatusBadge, LoadingSpinner, Modal, Pagination, StatCard
 │       │   └── requests/           # RequestCard, ApprovalTimeline (with 4-stage visual tracker)
 │       └── pages/
+│           ├── public/             # Public landing page
 │           ├── auth/               # LoginPage, RegisterPage
 │           ├── student/            # StudentDashboard, NewRequestPage, MyRequestsPage
 │           ├── staff/              # StaffDashboard (Teacher/Coordinator/Mentor/HOD/Dean)
@@ -108,8 +109,8 @@ CampusFlow/
     ├── models/
     │   ├── User.js                 # Users & faculty assignments schema
     │   ├── Request.js              # Academic requests schema (all 4 categories)
-    │   ├── ApprovalHistory.js      # Immutable audit trail of every review action
-    │   ├── Notification.js         # In-app real-time alerts
+    │   ├── ApprovalHistory.js      # Append-only-by-application review history
+    │   ├── Notification.js         # In-app notifications
     │   └── FileRecord.js           # Cloudinary asset identifiers & document metadata
     ├── middleware/
     │   ├── auth.middleware.js      # JWT cookie & header token verification
@@ -117,11 +118,16 @@ CampusFlow/
     │   ├── upload.middleware.js    # Multer configuration & file type filters (memoryStorage)
     │   └── error.middleware.js     # Centralized error handler
     ├── controllers/
-    │   ├── auth.controller.js      # Student register, login, logout, me
-    │   ├── request.controller.js   # Submit, fetch, approve, reject, return, resubmit
-    │   ├── user.controller.js      # Admin staff creation, user directory, status toggle
-    │   ├── file.controller.js      # Authenticated Cloudinary signed URL generation
-    │   └── notification.controller.js # Notification list & mark-as-read
+    │   ├── auth.controller.js      # Student register, login, logout, current user
+    │   ├── request.controller.js   # Assigned-approver workflow actions
+    │   └── file.controller.js      # Authenticated Cloudinary signed URL generation
+    ├── routes/
+    │   ├── auth.routes.js          # Authentication endpoints
+    │   ├── request.routes.js       # Request CRUD and workflow endpoints
+    │   ├── user.routes.js          # Current-user profile endpoints
+    │   ├── admin.routes.js         # Admin statistics and user management
+    │   ├── notification.routes.js  # Notification list and read-state endpoints
+    │   └── file.routes.js          # Authorized document access
     ├── services/
     │   ├── workflow.service.js     # Core approval state machine & sequential routing
     │   ├── storage.service.js      # Cloudinary upload, signed URL generation & deletion
@@ -449,13 +455,17 @@ This verification does not load `server/.env`, use demo accounts, or contact Clo
 - `GET /api/files/:id` — Returns a time-limited signed Cloudinary URL (JSON) after authorization check
 - `GET /api/files/:id?meta=true` — Retrieve JSON metadata for the file (no signed URL)
 
-### Users & Administration (`/api/users`)
+### User Profile (`/api/users`)
 - `GET /api/users/profile` — Get authenticated user's profile
 - `PUT /api/users/profile` — Update name or change password
-- `GET /api/users` — *(Admin only)* Search and list campus users
-- `POST /api/users` — *(Admin only)* Create staff accounts with role & class assignments
-- `PUT /api/users/:id` — *(Admin only)* Edit user details and responsibilities
-- `PATCH /api/users/:id/status` — *(Admin only)* Activate or deactivate an account
+
+### Administration (`/api/admin`) — Admin role required
+- `GET /api/admin/stats` — Get live user and request counts
+- `GET /api/admin/users` — Search and list campus users
+- `POST /api/admin/users` — Create an account with role and class assignments
+- `GET /api/admin/users/:id` — Retrieve a user
+- `PUT /api/admin/users/:id` — Update user details and responsibilities
+- `PATCH /api/admin/users/:id/status` — Activate or deactivate a user
 
 ### Notifications (`/api/notifications`)
 - `GET /api/notifications` — Fetch user's notification list and unread count

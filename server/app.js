@@ -6,6 +6,7 @@ const helmet = require('helmet');
 
 const authRoutes = require('./routes/auth.routes');
 const userRoutes = require('./routes/user.routes');
+const adminRoutes = require('./routes/admin.routes');
 const requestRoutes = require('./routes/request.routes');
 const fileRoutes = require('./routes/file.routes');
 const notificationRoutes = require('./routes/notification.routes');
@@ -47,6 +48,7 @@ app.get('/api/health', (req, res) => {
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/requests', requestRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/notifications', notificationRoutes);

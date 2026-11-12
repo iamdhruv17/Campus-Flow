@@ -1,14 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Users, UserPlus, Search, Filter, Edit, Power, Check, X,
-  GraduationCap, Briefcase, BookOpen, ShieldAlert
+  UserPlus, Search, Edit, Power
 } from 'lucide-react';
 import { userService } from '../../services/user.service';
 import Modal from '../../components/common/Modal';
 import Pagination from '../../components/common/Pagination';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import { ROLES, BRANCHES, YEARS, SECTIONS } from '../../utils/constants';
-import { formatDate, getErrorMessage } from '../../utils/formatters';
+import { getErrorMessage } from '../../utils/formatters';
 import toast from 'react-hot-toast';
 
 export default function UserManagementPage() {

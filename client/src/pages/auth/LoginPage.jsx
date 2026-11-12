@@ -35,7 +35,7 @@ export default function LoginPage() {
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-indigo-600 shadow-lg mb-4">
             <GraduationCap size={28} className="text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-slate-900">CampusFlow</h1>
+          <Link to="/" className="text-2xl font-bold text-slate-900">CampusFlow</Link>
           <p className="text-slate-500 text-sm mt-1">Academic Request & Approval Portal</p>
         </div>
 

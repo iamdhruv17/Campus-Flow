@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { User, Mail, Shield, BookOpen, KeyRound, CheckCircle } from 'lucide-react';
+import { User, KeyRound } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { userService } from '../../services/user.service';
 import { ROLES } from '../../utils/constants';

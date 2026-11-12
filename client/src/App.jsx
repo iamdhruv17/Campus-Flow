@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { PageLoader } from './components/common/LoadingSpinner';
 import AppLayout from './layouts/AppLayout';
+import LandingPage from './pages/public/LandingPage';
 
 // Auth Pages
 import LoginPage from './pages/auth/LoginPage';
@@ -52,6 +53,10 @@ export default function App() {
   return (
     <Routes>
       {/* Public Routes */}
+      <Route
+        path="/"
+        element={user ? <Navigate to="/dashboard" replace /> : <LandingPage />}
+      />
       <Route
         path="/login"
         element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />}
@@ -134,7 +139,7 @@ export default function App() {
       {/* Root redirect */}
       <Route
         path="*"
-        element={<Navigate to={user ? "/dashboard" : "/login"} replace />}
+        element={<Navigate to={user ? '/dashboard' : '/'} replace />}
       />
     </Routes>
   );

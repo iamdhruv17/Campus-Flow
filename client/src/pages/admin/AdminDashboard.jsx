@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Users, UserPlus, FileText, CheckCircle2, AlertTriangle,
-  Settings, ArrowRight, ShieldCheck, GraduationCap
+  ArrowRight, ShieldCheck
 } from 'lucide-react';
 import { userService } from '../../services/user.service';
 import { requestService } from '../../services/request.service';
@@ -13,35 +13,20 @@ import toast from 'react-hot-toast';
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState(null);
-  const [userCounts, setUserCounts] = useState({ total: 0, students: 0, staff: 0 });
+  const [userCounts, setUserCounts] = useState({ totalUsers: 0, students: 0, staff: 0 });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [statsRes, usersRes] = await Promise.all([
+        const [statsRes, adminStatsRes] = await Promise.all([
           requestService.getStats(),
-          userService.getAll({ limit: 1 }), // getting total from pagination
+          userService.getAdminStats(),
         ]);
 
         setStats(statsRes.data.stats);
-
-        // Fetch counts by role
-        const [studentsRes, teachersRes] = await Promise.all([
-          userService.getAll({ role: 'student', limit: 1 }),
-          userService.getAll({ limit: 1 }),
-        ]);
-
-        const totalUsers = usersRes.data.pagination?.total || 0;
-        const totalStudents = studentsRes.data.pagination?.total || 0;
-        const totalStaff = totalUsers - totalStudents;
-
-        setUserCounts({
-          total: totalUsers,
-          students: totalStudents,
-          staff: Math.max(0, totalStaff),
-        });
+        setUserCounts(adminStatsRes.data.stats);
       } catch (err) {
         toast.error(getErrorMessage(err));
       } finally {
@@ -75,7 +60,7 @@ export default function AdminDashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="Total System Users"
-          value={userCounts.total}
+          value={userCounts.totalUsers}
           icon={Users}
           color="indigo"
           description={`${userCounts.students} Students · ${userCounts.staff} Staff`}

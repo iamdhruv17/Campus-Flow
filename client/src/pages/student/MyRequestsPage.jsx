@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Search, Filter, PlusCircle, FileText, RotateCcw } from 'lucide-react';
+import { PlusCircle, FileText, RotateCcw } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 import { requestService } from '../../services/request.service';
 import RequestCard from '../../components/requests/RequestCard';
 import Pagination from '../../components/common/Pagination';
@@ -11,6 +12,7 @@ import { getErrorMessage } from '../../utils/formatters';
 import toast from 'react-hot-toast';
 
 export default function MyRequestsPage() {
+  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [requests, setRequests] = useState([]);
   const [pagination, setPagination] = useState(null);
@@ -64,13 +66,19 @@ export default function MyRequestsPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
         <div>
-          <h1 className="page-title">My Requests</h1>
-          <p className="page-subtitle">Track status and review history of all submitted requests.</p>
+          <h1 className="page-title">{user?.role === 'student' ? 'My Requests' : 'Academic Requests'}</h1>
+          <p className="page-subtitle">
+            {user?.role === 'student'
+              ? 'Track status and review history of all submitted requests.'
+              : 'Review requests assigned to you or previously handled.'}
+          </p>
         </div>
-        <Link to="/requests/new" className="btn-primary">
-          <PlusCircle size={16} />
-          New Request
-        </Link>
+        {user?.role === 'student' && (
+          <Link to="/requests/new" className="btn-primary">
+            <PlusCircle size={16} />
+            New Request
+          </Link>
+        )}
       </div>
 
       {/* Filters */}
@@ -137,7 +145,7 @@ export default function MyRequestsPage() {
       ) : (
         <div className="space-y-3">
           {requests.map((req) => (
-            <RequestCard key={req._id} request={req} />
+            <RequestCard key={req._id} request={req} showRequester={user?.role !== 'student'} />
           ))}
           <Pagination pagination={pagination} onPageChange={handlePageChange} />
         </div>

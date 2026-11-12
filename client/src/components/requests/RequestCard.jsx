@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
 import StatusBadge from '../common/StatusBadge';
 import { REQUEST_TYPES } from '../../utils/constants';
-import { formatDate, formatRelativeTime } from '../../utils/formatters';
+import { formatRelativeTime } from '../../utils/formatters';
 
 export default function RequestCard({ request, showRequester = false }) {
   const typeLabel = REQUEST_TYPES[request.requestType] || request.requestType;

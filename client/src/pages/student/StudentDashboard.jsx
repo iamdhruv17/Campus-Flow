@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   FileText, Clock, CheckCircle, XCircle, RotateCcw,
-  PlusCircle, AlertCircle, TrendingUp,
+  PlusCircle, AlertCircle,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { requestService } from '../../services/request.service';

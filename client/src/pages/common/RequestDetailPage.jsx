@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, Calendar, User, BookOpen, Clock, FileText, Download,
-  CheckCircle, XCircle, RotateCcw, AlertTriangle, Send, Upload, ExternalLink
+  ArrowLeft, FileText, Download, CheckCircle, XCircle, RotateCcw,
+  AlertTriangle, Send
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { requestService } from '../../services/request.service';
@@ -57,7 +57,7 @@ export default function RequestDetailPage() {
     fetchRequestDetails();
   }, [fetchRequestDetails]);
 
-  const handleDownloadFile = async (fileId, fileName) => {
+  const handleDownloadFile = async (fileId) => {
     try {
       // Backend performs authorization check and returns a time-limited signed URL
       const res = await fileService.getSignedUrl(fileId);
@@ -282,7 +282,7 @@ export default function RequestDetailPage() {
                       </div>
                     </div>
                     <button
-                      onClick={() => handleDownloadFile(att._id, att.originalName)}
+                      onClick={() => handleDownloadFile(att._id)}
                       className="btn-secondary btn-sm px-2.5 py-1 text-xs ml-2 flex items-center gap-1"
                       title="Open Document"
                     >

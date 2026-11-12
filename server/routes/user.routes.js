@@ -15,26 +15,54 @@ router.get('/profile', protect, async (req, res, next) => {
 
 router.put('/profile', protect, async (req, res, next) => {
   try {
-    const { name, branch, year, section, rollNumber, department } = req.body;
+    const body = req.body || {};
+    const protectedFields = [
+      'role',
+      'branch',
+      'year',
+      'section',
+      'rollNumber',
+      'department',
+      'assignedSubjects',
+      'assignedClass',
+      'mentoringClasses',
+      'headOfDepartments',
+      'isActive',
+    ];
+    const attemptedProtectedField = protectedFields.find((field) =>
+      Object.prototype.hasOwnProperty.call(body, field)
+    );
+    if (attemptedProtectedField) {
+      return sendError(
+        res,
+        400,
+        'Academic details and protected account settings can only be changed by an administrator.'
+      );
+    }
+
+    const allowedFields = ['name', 'currentPassword', 'newPassword'];
+    const unexpectedField = Object.keys(body).find((field) => !allowedFields.includes(field));
+    if (unexpectedField) {
+      return sendError(res, 400, 'Only your name and password can be updated through the profile endpoint.');
+    }
+
     const user = await User.findById(req.user._id);
     if (!user) return sendError(res, 404, 'User not found.');
 
-    if (name !== undefined) user.name = name;
-    if (branch !== undefined) user.branch = branch;
-    if (year !== undefined) user.year = Number(year);
-    if (section !== undefined) user.section = section;
-    if (rollNumber !== undefined) user.rollNumber = rollNumber;
-    if (department !== undefined) user.department = department;
+    if (body.name !== undefined) user.name = body.name;
 
-    if (req.body.currentPassword || req.body.newPassword) {
-      if (!req.body.currentPassword || !req.body.newPassword) {
+    const passwordChangeRequested =
+      Object.prototype.hasOwnProperty.call(body, 'currentPassword') ||
+      Object.prototype.hasOwnProperty.call(body, 'newPassword');
+    if (passwordChangeRequested) {
+      if (!body.currentPassword || !body.newPassword) {
         return sendError(res, 400, 'Current and new passwords are both required.');
       }
 
       const userWithPassword = await User.findById(req.user._id).select('+passwordHash');
-      const isMatch = await userWithPassword.comparePassword(req.body.currentPassword);
+      const isMatch = await userWithPassword.comparePassword(body.currentPassword);
       if (!isMatch) return sendError(res, 400, 'Current password is incorrect.');
-      user.passwordHash = req.body.newPassword;
+      user.passwordHash = body.newPassword;
     }
 
     await user.save();

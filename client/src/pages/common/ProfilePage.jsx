@@ -78,27 +78,34 @@ export default function ProfilePage() {
             <span className="font-semibold text-slate-800 capitalize">{ROLES[user?.role] || user?.role}</span>
           </div>
           <div>
-            <span className="text-slate-400 block mb-0.5">Department / Branch</span>
-            <span className="font-semibold text-slate-800">{user?.department || user?.branch || '—'}</span>
+            <span className="text-slate-400 block mb-0.5">Branch</span>
+            <span className="font-semibold text-slate-800">{user?.branch || '—'}</span>
           </div>
-          {user?.role === 'student' && (
-            <>
-              <div>
-                <span className="text-slate-400 block mb-0.5">Class / Section</span>
-                <span className="font-semibold text-slate-800">Year {user?.year} ({user?.section})</span>
-              </div>
-              <div>
-                <span className="text-slate-400 block mb-0.5">Roll Number</span>
-                <span className="font-semibold text-slate-800">{user?.rollNumber || '—'}</span>
-              </div>
-            </>
-          )}
+          <div>
+            <span className="text-slate-400 block mb-0.5">Year</span>
+            <span className="font-semibold text-slate-800">{user?.year || '—'}</span>
+          </div>
+          <div>
+            <span className="text-slate-400 block mb-0.5">Section</span>
+            <span className="font-semibold text-slate-800">{user?.section || '—'}</span>
+          </div>
+          <div>
+            <span className="text-slate-400 block mb-0.5">Roll Number</span>
+            <span className="font-semibold text-slate-800">{user?.rollNumber || '—'}</span>
+          </div>
+          <div>
+            <span className="text-slate-400 block mb-0.5">Department</span>
+            <span className="font-semibold text-slate-800">{user?.department || '—'}</span>
+          </div>
         </div>
+        <p className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          Academic details and account settings can only be changed by an administrator.
+        </p>
 
         {/* Edit Profile Form */}
         <form onSubmit={handleUpdateProfile} className="pt-6 space-y-5">
           <h3 className="section-title text-base flex items-center gap-2">
-            <User size={18} className="text-indigo-600" /> Edit Details
+            <User size={18} className="text-indigo-600" /> Personal Details
           </h3>
 
           <div className="form-group">

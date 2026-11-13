@@ -32,9 +32,9 @@ const sameId = (left, right) =>
 /**
  * Find teacher assigned to a subject for a given student.
  */
-const findTeacherForSubject = async (subjectName, branch, year, section) => {
+const findTeacherForSubject = async (subjectName, branch, year, section, roles) => {
   const teacher = await User.findOne({
-    role: { $in: ['teacher', 'coordinator', 'mentor', 'hod', 'dean'] },
+    role: { $in: roles || ['teacher', 'coordinator', 'mentor', 'hod', 'dean'] },
     isActive: true,
     assignedSubjects: {
       $elemMatch: {
@@ -188,9 +188,12 @@ const routeNewRequest = async (request, requester) => {
       approver = await findHOD(rd || department);
       stage = 'hod';
     }
-    stage = approver ? (approver.role === 'hod' ? 'hod' : 'teacher') : 'hod';
+    stage = approver ? approver.role : 'hod';
   } else if (requestType === 'event_attendance') {
     approver = await findTeacherForSubject(request.subject || '', rb, ry, rs);
+    if (approver) {
+      stage = approver.role;
+    }
     if (!approver) {
       approver = await findCoordinator(rb, ry, rs);
       stage = 'coordinator';
@@ -198,9 +201,6 @@ const routeNewRequest = async (request, requester) => {
     if (!approver) {
       approver = await findHOD(rd || department);
       stage = 'hod';
-    }
-    if (approver) {
-      stage = approver.role;
     }
   } else if (requestType === 'medical_leave') {
     approver = await getMedicalLeaveApprover('coordinator', requester);
@@ -243,6 +243,59 @@ const getNextApproverForMedicalLeave = async (currentStage, requester) => {
     approver: await getMedicalLeaveApprover(nextStage, requester),
     stage: nextStage,
   };
+};
+
+const getApproverForStage = async (stage, request, requester) => {
+  const { branch, year, section } = requester;
+  let approver;
+  if (stage === 'teacher') {
+    approver = await findTeacherForSubject(
+      request.subject || '',
+      branch,
+      year,
+      section,
+      ['teacher']
+    );
+  } else if (stage === 'coordinator') {
+    approver = await findCoordinator(branch, year, section);
+  } else if (stage === 'mentor') {
+    approver = await findMentor(branch, year, section);
+  } else if (stage === 'hod') {
+    approver = await findHOD(requester.department || branch);
+  } else if (stage === 'dean') {
+    approver = await findDean();
+  } else {
+    throw createWorkflowError(
+      `Cannot resubmit request because "${stage}" is not a valid approval stage.`,
+      409
+    );
+  }
+
+  if (!approver) {
+    const stageLabel = {
+      teacher: 'subject teacher',
+      coordinator: 'Class Coordinator',
+      mentor: 'Mentor',
+      hod: 'HOD',
+      dean: 'Dean',
+    }[stage];
+    throw createWorkflowError(
+      `No active ${stageLabel} is assigned to the returned ${stage} stage. The request remains returned.`
+    );
+  }
+  return approver;
+};
+
+const assertActionableAndAssigned = (request, actor) => {
+  if (!['pending', 'under_review'].includes(request.status)) {
+    throw createWorkflowError(`Request is already ${request.status}.`, 409);
+  }
+  if (
+    actor.isActive === false ||
+    !sameId(request.currentApproverId, actor._id)
+  ) {
+    throw createWorkflowError('You are not the active assigned approver for this request.', 403);
+  }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -291,6 +344,7 @@ const saveRequestWithHistory = async (request, {
  * Process APPROVE action by an authorized approver.
  */
 const processApprove = async (request, actor, remarks) => {
+  assertActionableAndAssigned(request, actor);
   // Fetch the requester to use their class info for routing
   const requester = await User.findById(request.requesterId);
   if (!requester) throw new Error('Requester not found.');
@@ -396,9 +450,10 @@ const processApprove = async (request, actor, remarks) => {
  * Process REJECT action.
  */
 const processReject = async (request, actor, remarks) => {
-  if (!remarks || remarks.trim() === '') {
+  if (typeof remarks !== 'string' || remarks.trim() === '') {
     throw new Error('Remarks are required when rejecting a request.');
   }
+  assertActionableAndAssigned(request, actor);
 
   const previousStage = request.currentApprovalStage;
 
@@ -440,9 +495,10 @@ const processReject = async (request, actor, remarks) => {
  * Process RETURN FOR CORRECTION action.
  */
 const processReturn = async (request, actor, remarks) => {
-  if (!remarks || remarks.trim() === '') {
+  if (typeof remarks !== 'string' || remarks.trim() === '') {
     throw new Error('Remarks are required when returning a request.');
   }
+  assertActionableAndAssigned(request, actor);
 
   const previousStage = request.currentApprovalStage;
 
@@ -456,7 +512,7 @@ const processReturn = async (request, actor, remarks) => {
   }
 
   request.status = 'returned';
-  // Keep currentApprovalStage so we know where to send it back after resubmission
+  // Keep the stage for resubmission, but only medical requests retain their assigned approver.
   if (request.requestType !== 'medical_leave') {
     request.currentApproverId = null;
   }
@@ -489,28 +545,38 @@ const processResubmit = async (request, requester, updates) => {
   if (request.status !== 'returned') {
     throw new Error('Only returned requests can be resubmitted.');
   }
-  if (request.requesterId.toString() !== requester._id.toString()) {
+  if (
+    requester.role !== 'student' ||
+    request.requesterId.toString() !== requester._id.toString()
+  ) {
     throw new Error('You can only resubmit your own requests.');
-  }
-  if (request.requestType === 'medical_leave' && requester.role !== 'student') {
-    throw createWorkflowError('Only the student who submitted this request can resubmit it.', 403);
   }
 
   const returnedFromStage = request.currentApprovalStage;
   const previousApproverId = request.currentApproverId;
-  let nextApprover = null;
+  let nextApprover;
 
   if (request.requestType === 'medical_leave') {
     nextApprover = await getMedicalLeaveApprover(returnedFromStage, requester);
   }
 
-  // Apply updates (description, attachments, etc.)
-  const allowedUpdates = [
-    'description', 'subject', 'attendanceDate', 'lectureNumber',
-    'eventName', 'eventDate', 'eventOrganizer', 'participationDetails',
-    'leaveStartDate', 'leaveEndDate', 'medicalDescription',
-    'grievanceCategory', 'targetDepartment',
-  ];
+  const allowedUpdatesByType = {
+    attendance_correction: [
+      'description', 'subject', 'subjectCode', 'attendanceDate', 'lectureNumber',
+    ],
+    event_attendance: [
+      'description', 'subject', 'eventName', 'eventDate', 'eventOrganizer',
+      'participationDetails',
+    ],
+    medical_leave: [
+      'description', 'leaveStartDate', 'leaveEndDate', 'medicalDescription',
+    ],
+    other_grievance: ['description', 'grievanceCategory', 'targetDepartment'],
+  };
+  const allowedUpdates = allowedUpdatesByType[request.requestType];
+  if (!allowedUpdates) {
+    throw createWorkflowError(`Unsupported request type: ${request.requestType}.`, 400);
+  }
   allowedUpdates.forEach((field) => {
     if (updates[field] !== undefined) request[field] = updates[field];
   });
@@ -519,36 +585,16 @@ const processResubmit = async (request, requester, updates) => {
     request.attachments.push(...updates.attachments);
   }
 
-  // Determine who should review it now (same stage it was returned from)
   if (request.requestType !== 'medical_leave') {
-    if (returnedFromStage === 'teacher' || returnedFromStage === 'coordinator') {
-      if (request.requestType === 'attendance_correction' || request.requestType === 'event_attendance') {
-        nextApprover = await findTeacherForSubject(
-          request.subject || '', requester.branch, requester.year, requester.section
-        );
-        if (!nextApprover) nextApprover = await findHOD(requester.department);
-      }
-    } else if (returnedFromStage === 'mentor') {
-      nextApprover = await findMentor(requester.branch, requester.year, requester.section);
-    } else if (returnedFromStage === 'hod') {
-      nextApprover = await findHOD(requester.department);
-    } else if (returnedFromStage === 'dean') {
-      nextApprover = await findDean();
-    }
-  }
-
-  if (request.requestType === 'medical_leave' && !nextApprover) {
-    throw createWorkflowError(
-      `No active approver is assigned to the ${returnedFromStage} stage. The request remains returned.`
-    );
+    nextApprover = await getApproverForStage(returnedFromStage, request, requester);
   }
 
   request.status = 'under_review';
+  request.currentApprovalStage = returnedFromStage;
   request.currentApproverId = nextApprover ? nextApprover._id : null;
   request.resubmissionCount += 1;
 
   const reassignmentRemark =
-    request.requestType === 'medical_leave' &&
     previousApproverId &&
     !sameId(previousApproverId, nextApprover._id)
       ? ' The request was assigned to the active approver currently responsible for this stage.'

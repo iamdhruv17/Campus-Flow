@@ -6,14 +6,14 @@ const getAssignedRequest = async (id, user) => {
   const request = await Request.findById(id);
   if (!request) return null;
 
+  if (!['pending', 'under_review'].includes(request.status)) {
+    return { completed: true, request };
+  }
   if (
     !request.currentApproverId ||
     request.currentApproverId.toString() !== user._id.toString()
   ) {
     return { denied: true };
-  }
-  if (!['pending', 'under_review'].includes(request.status)) {
-    return { completed: true, request };
   }
   return { request };
 };
@@ -32,7 +32,7 @@ const approveRequest = async (req, res, next) => {
     const updated = await workflowService.processApprove(
       result.request,
       req.user,
-      req.body.remarks || ''
+      typeof req.body?.remarks === 'string' ? req.body.remarks.trim() : ''
     );
     const populated = await Request.findById(updated._id)
       .populate('requesterId', 'name email')
@@ -53,14 +53,14 @@ const rejectRequest = async (req, res, next) => {
     if (result.completed) {
       return sendError(res, 400, `Request is already ${result.request.status}.`);
     }
-    if (!req.body.remarks || req.body.remarks.trim() === '') {
+    if (typeof req.body?.remarks !== 'string' || req.body.remarks.trim() === '') {
       return sendError(res, 400, 'Remarks are required when rejecting a request.');
     }
 
     const updated = await workflowService.processReject(
       result.request,
       req.user,
-      req.body.remarks
+      req.body.remarks.trim()
     );
     const populated = await Request.findById(updated._id)
       .populate('requesterId', 'name email')
@@ -81,14 +81,14 @@ const returnRequest = async (req, res, next) => {
     if (result.completed) {
       return sendError(res, 400, `Request is already ${result.request.status}.`);
     }
-    if (!req.body.remarks || req.body.remarks.trim() === '') {
+    if (typeof req.body?.remarks !== 'string' || req.body.remarks.trim() === '') {
       return sendError(res, 400, 'Remarks are required when returning a request.');
     }
 
     const updated = await workflowService.processReturn(
       result.request,
       req.user,
-      req.body.remarks
+      req.body.remarks.trim()
     );
     const populated = await Request.findById(updated._id)
       .populate('requesterId', 'name email')

@@ -27,7 +27,7 @@ const { sendSuccess, sendError } = require('../utils/apiResponse');
  * Authorization rules:
  *   Student  — own requests only
  *   Staff    — currently assigned as approver OR has acted on the request (ApprovalHistory)
- *   Admin    — requests they are associated with (not unconditional access)
+ *   Admin    — all requests
  *
  * The signed URL returned is a temporary bearer link (5-minute expiry).
  * The application performs its own authorization check before generating it.
@@ -50,17 +50,15 @@ const getFile = async (req, res, next) => {
     const isCurrentApprover =
       request.currentApproverId &&
       request.currentApproverId.toString() === userId;
-    const isUploader = fileRecord.uploaderId.toString() === userId;
 
-    // Admin access: limited to requests they are specifically associated with
-    // (not unconditional access to all medical documents)
-    const isAdminWithContext =
-      userRole === 'admin' &&
-      (isUploader || isCurrentApprover);
+    const isAdmin = userRole === 'admin';
+    const isStudentOwner = userRole === 'student' && isOwner;
+    const isAssignedStaff =
+      userRole !== 'student' && userRole !== 'admin' && isCurrentApprover;
 
-    let authorized = isOwner || isCurrentApprover || isUploader || isAdminWithContext;
+    let authorized = isAdmin || isStudentOwner || isAssignedStaff;
 
-    if (!authorized) {
+    if (!authorized && userRole !== 'student' && !isAdmin) {
       // Check if the user has historically acted on this request
       const hasActed = await ApprovalHistory.exists({
         requestId: request._id,

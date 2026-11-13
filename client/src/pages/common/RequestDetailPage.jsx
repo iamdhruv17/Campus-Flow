@@ -16,6 +16,11 @@ import { REQUEST_TYPES, APPROVAL_STAGES } from '../../utils/constants';
 import { formatDate, formatDateTime, formatFileSize, getErrorMessage } from '../../utils/formatters';
 import toast from 'react-hot-toast';
 
+const ALLOWED_FILE_TYPES = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
+const ALLOWED_FILE_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png'];
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
+const MAX_REQUEST_FILES = 5;
+
 export default function RequestDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -100,8 +105,24 @@ export default function RequestDetailPage() {
 
   const handleResubmit = async (e) => {
     e.preventDefault();
-    if (!resubmitDescription.trim()) {
-      toast.error('Please enter updated details.');
+    if (resubmitDescription.trim().length < 10) {
+      toast.error('Description must be at least 10 characters long.');
+      return;
+    }
+    if ((request.attachments?.length || 0) + resubmitFiles.length > MAX_REQUEST_FILES) {
+      toast.error('A request may include no more than 5 supporting documents.');
+      return;
+    }
+    const invalidFile = resubmitFiles.find((file) => {
+      const extension = `.${file.name.split('.').pop()}`.toLowerCase();
+      return (
+        !ALLOWED_FILE_TYPES.includes(file.type) ||
+        !ALLOWED_FILE_EXTENSIONS.includes(extension) ||
+        file.size > MAX_FILE_SIZE
+      );
+    });
+    if (invalidFile) {
+      toast.error(`${invalidFile.name}: Use a PDF, JPG, or PNG file no larger than 5 MB.`);
       return;
     }
 

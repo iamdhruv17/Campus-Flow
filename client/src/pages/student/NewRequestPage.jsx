@@ -33,7 +33,11 @@ function FileUploadZone({ files, setFiles, required, label }) {
       }
       return true;
     });
-    setFiles(prev => [...prev, ...valid].slice(0, 5));
+    const remainingSlots = Math.max(0, 5 - files.length);
+    if (valid.length > remainingSlots) {
+      toast.error('A request may include no more than 5 supporting documents.');
+    }
+    setFiles(prev => [...prev, ...valid.slice(0, remainingSlots)]);
   };
 
   const removeFile = (index) => {
@@ -99,6 +103,21 @@ export default function NewRequestPage() {
   }, [searchParams, setValue]);
 
   const onSubmit = async (data) => {
+    if (!Object.prototype.hasOwnProperty.call(REQUEST_TYPES, data.requestType)) {
+      toast.error('Please select a supported request category.');
+      return;
+    }
+    if (data.description.trim().length < 10) {
+      toast.error('Description must be at least 10 characters long.');
+      return;
+    }
+    if (
+      data.requestType === 'medical_leave' &&
+      data.leaveStartDate > data.leaveEndDate
+    ) {
+      toast.error('Leave end date must be on or after the leave start date.');
+      return;
+    }
     if (data.requestType === 'medical_leave' && files.length === 0) {
       toast.error('Please upload at least one medical document.');
       return;

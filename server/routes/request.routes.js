@@ -15,6 +15,76 @@ const {
   returnRequest,
 } = require('../controllers/request.controller');
 
+const REQUEST_TYPES = new Set([
+  'attendance_correction',
+  'event_attendance',
+  'medical_leave',
+  'other_grievance',
+]);
+
+const isValidDate = (value) => {
+  if (value instanceof Date) return !Number.isNaN(value.getTime());
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+};
+
+const dateValue = (value) =>
+  value instanceof Date ? value.getTime() : new Date(`${value}T00:00:00.000Z`).getTime();
+
+const validateRequestFields = (requestType, fields) => {
+  if (!REQUEST_TYPES.has(requestType)) {
+    return 'Unsupported request type. Choose Attendance Correction, Event Attendance, Medical Leave, or Other Academic Grievance.';
+  }
+  if (typeof fields.description !== 'string' || fields.description.trim().length < 10) {
+    return 'Description is required and must be at least 10 characters long.';
+  }
+
+  const requiredTextFields = {
+    attendance_correction: ['subject'],
+    event_attendance: ['eventName'],
+    medical_leave: [],
+    other_grievance: ['grievanceCategory'],
+  }[requestType];
+  for (const field of requiredTextFields) {
+    if (typeof fields[field] !== 'string' || !fields[field].trim()) {
+      return `${field} is required for this request type.`;
+    }
+  }
+
+  const requiredDates = {
+    attendance_correction: ['attendanceDate'],
+    event_attendance: ['eventDate'],
+    medical_leave: ['leaveStartDate', 'leaveEndDate'],
+    other_grievance: [],
+  }[requestType];
+  for (const field of requiredDates) {
+    if (!fields[field]) return `${field} is required for this request type.`;
+    if (!isValidDate(fields[field])) return `${field} must be a valid calendar date.`;
+  }
+
+  if (
+    requestType === 'medical_leave' &&
+    dateValue(fields.leaveStartDate) > dateValue(fields.leaveEndDate)
+  ) {
+    return 'Leave end date must be on or after the leave start date.';
+  }
+  return null;
+};
+
+const requestFieldsByType = {
+  attendance_correction: ['subject', 'subjectCode', 'attendanceDate', 'lectureNumber'],
+  event_attendance: [
+    'subject',
+    'eventName',
+    'eventDate',
+    'eventOrganizer',
+    'participationDetails',
+  ],
+  medical_leave: ['leaveStartDate', 'leaveEndDate', 'medicalDescription'],
+  other_grievance: ['grievanceCategory', 'targetDepartment'],
+};
+
 router.get('/stats', protect, async (req, res, next) => {
   try {
     let matchFilter = {};
@@ -53,16 +123,11 @@ router.get('/stats', protect, async (req, res, next) => {
 router.post('/', protect, authorize('student'), upload.array('files', 5), async (req, res, next) => {
   try {
     const requester = req.user;
-    const {
-      requestType, description, subject, subjectCode, attendanceDate, lectureNumber,
-      eventName, eventDate, eventOrganizer, participationDetails,
-      leaveStartDate, leaveEndDate, medicalDescription,
-      grievanceCategory, targetDepartment,
-    } = req.body;
+    const body = req.body || {};
+    const { requestType, description } = body;
 
-    if (!requestType || !description) {
-      return sendError(res, 400, 'Request type and description are required.');
-    }
+    const validationError = validateRequestFields(requestType, body);
+    if (validationError) return sendError(res, 400, validationError);
     if (requestType === 'medical_leave' && (!req.files || req.files.length === 0)) {
       return sendError(res, 400, 'Medical leave requests require at least one supporting document.');
     }
@@ -83,15 +148,13 @@ router.post('/', protect, authorize('student'), upload.array('files', 5), async 
       status: 'pending',
     };
 
-    if (requestType === 'attendance_correction') {
-      Object.assign(requestData, { subject, subjectCode, attendanceDate, lectureNumber });
-    } else if (requestType === 'event_attendance') {
-      Object.assign(requestData, { subject, eventName, eventDate, eventOrganizer, participationDetails });
-    } else if (requestType === 'medical_leave') {
-      Object.assign(requestData, { leaveStartDate, leaveEndDate, medicalDescription });
-    } else if (requestType === 'other_grievance') {
-      Object.assign(requestData, { grievanceCategory, targetDepartment });
+    for (const field of requestFieldsByType[requestType]) {
+      if (body[field] !== undefined) {
+        requestData[field] =
+          typeof body[field] === 'string' ? body[field].trim() : body[field];
+      }
     }
+    requestData.description = description.trim();
 
     // Resolve the mandatory first medical stage before creating the request or uploading files.
     let route;
@@ -289,13 +352,45 @@ router.put('/:id/return', protect, returnRequest);
 
 router.put('/:id/resubmit', protect, upload.array('files', 5), async (req, res, next) => {
   try {
+    const body = req.body || {};
     const request = await Request.findById(req.params.id);
     if (!request) return sendError(res, 404, 'Request not found.');
+    if (
+      req.user.role !== 'student' ||
+      request.requesterId.toString() !== req.user._id.toString()
+    ) {
+      return sendError(res, 403, 'Only the original student may resubmit this request.');
+    }
     if (request.status !== 'returned') {
       return sendError(res, 400, 'Only returned requests can be resubmitted.');
     }
-    if (request.requesterId.toString() !== req.user._id.toString()) {
-      return sendError(res, 403, 'You can only resubmit your own requests.');
+    if (!REQUEST_TYPES.has(request.requestType)) {
+      return sendError(res, 400, 'The saved request has an unsupported request type.');
+    }
+
+    const updates = {};
+    for (const field of ['description', ...requestFieldsByType[request.requestType]]) {
+      if (Object.prototype.hasOwnProperty.call(body, field)) {
+        updates[field] =
+          typeof body[field] === 'string' ? body[field].trim() : body[field];
+      }
+    }
+    const validationError = validateRequestFields(request.requestType, {
+      ...request.toObject(),
+      ...updates,
+    });
+    if (validationError) return sendError(res, 400, validationError);
+
+    const existingFileCount = request.attachments?.length || 0;
+    const newFileCount = req.files?.length || 0;
+    if (existingFileCount + newFileCount > 5) {
+      return sendError(res, 400, 'A request may have no more than 5 supporting documents.');
+    }
+    if (
+      request.requestType === 'medical_leave' &&
+      existingFileCount + newFileCount === 0
+    ) {
+      return sendError(res, 400, 'Medical leave requests require at least one supporting document.');
     }
 
     const fileIds = [];
@@ -311,7 +406,6 @@ router.put('/:id/resubmit', protect, upload.array('files', 5), async (req, res, 
         fileIds.push(record._id);
       }
 
-      const updates = { ...req.body };
       if (fileIds.length > 0) updates.attachments = fileIds;
       await workflowService.processResubmit(request, req.user, updates);
     } catch (error) {

@@ -32,6 +32,12 @@ const errorHandler = (err, req, res, next) => {
   if (err.code === 'LIMIT_FILE_SIZE') {
     return res.status(400).json({ success: false, message: 'File too large. Maximum size is 5 MB.' });
   }
+  if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+    return res.status(400).json({
+      success: false,
+      message: 'A request may include no more than 5 supporting documents.',
+    });
+  }
   if (
     err.message &&
     (err.message.includes('Only PDF') ||

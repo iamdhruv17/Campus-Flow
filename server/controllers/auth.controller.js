@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { notifyStudent } = require('../services/notification.service');
 const { sendSuccess, sendError } = require('../utils/apiResponse');
+const { issueCsrfToken, cookieOptions } = require('../middleware/csrf.middleware');
 
 const COOKIE_OPTIONS = {
   httpOnly: true,
@@ -10,8 +11,8 @@ const COOKIE_OPTIONS = {
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
 };
 
-const signToken = (userId) => {
-  return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
+const signToken = (userId, tokenVersion = 0) => {
+  return jwt.sign({ id: userId, tokenVersion }, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   });
 };
@@ -46,8 +47,9 @@ const register = async (req, res, next) => {
       'general'
     ).catch(() => {});
 
-    const token = signToken(user._id);
+    const token = signToken(user._id, user.tokenVersion);
     res.cookie('token', token, COOKIE_OPTIONS);
+    issueCsrfToken(res);
 
     sendSuccess(res, 201, 'Registration successful.', { user: user.toPublicProfile() });
   } catch (error) {
@@ -64,7 +66,7 @@ const login = async (req, res, next) => {
       return sendError(res, 400, 'Email and password are required.');
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() }).select('+passwordHash');
+    const user = await User.findOne({ email: email.toLowerCase() }).select('+passwordHash +tokenVersion');
     if (!user) {
       return sendError(res, 401, 'Invalid email or password.');
     }
@@ -78,8 +80,9 @@ const login = async (req, res, next) => {
       return sendError(res, 401, 'Invalid email or password.');
     }
 
-    const token = signToken(user._id);
+    const token = signToken(user._id, user.tokenVersion);
     res.cookie('token', token, COOKIE_OPTIONS);
+    issueCsrfToken(res);
 
     sendSuccess(res, 200, 'Login successful.', { user: user.toPublicProfile() });
   } catch (error) {
@@ -94,6 +97,7 @@ const logout = (req, res) => {
     secure: process.env.NODE_ENV === 'production',
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
   });
+  res.clearCookie('csrfToken', cookieOptions());
   sendSuccess(res, 200, 'Logged out successfully.');
 };
 

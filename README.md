@@ -512,6 +512,7 @@ Notifications are stored per recipient and cover request assignment, forwarding,
    - `CLOUDINARY_CLOUD_NAME`
    - `CLOUDINARY_API_KEY`
    - `CLOUDINARY_API_SECRET`
+7. Keep the frontend and backend on HTTPS in production. Cookie-authenticated state-changing requests require the CSRF token flow handled by the frontend API client; do not bypass it with direct browser requests.
 
 ### Frontend (Vercel)
 1. Import your Git repository into [Vercel](https://vercel.com).
@@ -521,6 +522,8 @@ Notifications are stored per recipient and cover request assignment, forwarding,
 5. Deploy.
 
 > **Note:** Only `VITE_API_URL` should ever be set as a Vercel/frontend environment variable. Cloudinary credentials belong exclusively in the backend environment.
+>
+> Password changes invalidate previously issued JWT sessions. Users must sign in again after changing a password.
 
 ---
 

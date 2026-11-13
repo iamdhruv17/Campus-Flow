@@ -63,6 +63,7 @@ router.put('/profile', protect, async (req, res, next) => {
       const isMatch = await userWithPassword.comparePassword(body.currentPassword);
       if (!isMatch) return sendError(res, 400, 'Current password is incorrect.');
       user.passwordHash = body.newPassword;
+      user.tokenVersion = (user.tokenVersion || 0) + 1;
     }
 
     await user.save();

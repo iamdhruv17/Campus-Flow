@@ -8,7 +8,8 @@
     "dev": "nodemon server.js",
     "seed": "node scripts/seed.js",
     "test:profile": "node --test test/user-profile.test.js",
-    "test:requests": "node --test test/request-lifecycle.test.js"
+    "test:requests": "node --test test/request-lifecycle.test.js",
+    "test:security": "node --test test/security.test.js"
   },
   "keywords": [],
   "author": "",

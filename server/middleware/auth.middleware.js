@@ -21,13 +21,17 @@ const protect = async (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    const user = await User.findById(decoded.id).select('-passwordHash');
+    const user = await User.findById(decoded.id).select('+tokenVersion -passwordHash');
     if (!user) {
       return res.status(401).json({ success: false, message: 'User no longer exists.' });
     }
 
     if (!user.isActive) {
       return res.status(403).json({ success: false, message: 'Account is deactivated. Contact administrator.' });
+    }
+
+    if ((decoded.tokenVersion ?? 0) !== (user.tokenVersion ?? 0)) {
+      return res.status(401).json({ success: false, message: 'Session expired. Please log in again.' });
     }
 
     req.user = user;

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { register, login, logout, getMe } = require('../controllers/auth.controller');
 const { protect } = require('../middleware/auth.middleware');
+const { issueCsrfToken } = require('../middleware/csrf.middleware');
 const rateLimit = require('express-rate-limit');
 
 const authLimiter = rateLimit({
@@ -16,5 +17,8 @@ router.post('/register', authLimiter, register);
 router.post('/login', authLimiter, login);
 router.post('/logout', protect, logout);
 router.get('/me', protect, getMe);
+router.get('/csrf', (req, res) => {
+  res.json({ success: true, csrfToken: issueCsrfToken(res) });
+});
 
 module.exports = router;

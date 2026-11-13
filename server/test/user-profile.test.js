@@ -171,6 +171,7 @@ describe('profile update security', () => {
 
     assert.equal(response.status, 200);
     assert.equal(user.passwordHash, 'new-password');
+    assert.equal(user.tokenVersion, 1);
     assert.equal(user.saveCount, 1);
     assert.equal(data.success, true);
   });

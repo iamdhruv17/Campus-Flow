@@ -353,7 +353,10 @@ router.put('/users/:id', async (req, res, next) => {
     if (assignedClass !== undefined) user.assignedClass = assignedClass;
     if (mentoringClasses !== undefined) user.mentoringClasses = mentoringClasses;
     if (headOfDepartments !== undefined) user.headOfDepartments = headOfDepartments;
-    if (password) user.passwordHash = password;
+    if (password) {
+      user.passwordHash = password;
+      user.tokenVersion = (user.tokenVersion || 0) + 1;
+    }
 
     await user.save();
     const updatedUser = await User.findById(user._id).select('-passwordHash');

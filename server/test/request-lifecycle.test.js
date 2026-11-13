@@ -281,7 +281,7 @@ const installRouteMocks = () => {
       throw error;
     }
     return {
-      approver: { _id: 'teacher-1' },
+      approver: { _id: 'teacher-1', isActive: true },
       stage: request.requestType === 'medical_leave' ? 'coordinator' : 'teacher',
     };
   };
@@ -523,6 +523,71 @@ describe('request lifecycle routes and workflow', () => {
     assert.match(data.message, /Class Coordinator/i);
     assert.equal(requests.size, 0);
     assert.equal(uploadCount, 0);
+  });
+
+  for (const [type, unavailableRole] of [
+    ['attendance_correction', 'HOD'],
+    ['event_attendance', 'HOD'],
+    ['medical_leave', 'Class Coordinator'],
+    ['other_grievance', 'Dean'],
+  ]) {
+    it(`blocks ${type} submission when no eligible initial approver exists`, async () => {
+      workflowService.routeNewRequest = realWorkflow.routeNewRequest;
+      User.findOne = async () => null;
+      const { response, data } = await send('/requests', {
+        user: users.get('student-1'),
+        method: 'POST',
+        body: makeFormData(
+          createSubmissionBody(type),
+          type === 'medical_leave' ? 1 : 0
+        ),
+        multipart: true,
+      });
+
+      assert.equal(response.status, 503);
+      assert.match(data.message, new RegExp(unavailableRole, 'i'));
+      assert.equal(requests.size, 0);
+      assert.equal(uploadCount, 0);
+      assert.equal(history.length, 0);
+    });
+  }
+
+  it('rejects a routed approver that is not active before creating or uploading', async () => {
+    workflowService.routeNewRequest = async () => ({
+      approver: { _id: 'inactive-approver', isActive: false },
+      stage: 'teacher',
+    });
+    const { response, data } = await send('/requests', {
+      user: users.get('student-1'),
+      method: 'POST',
+      body: makeFormData(createSubmissionBody('attendance_correction'), 1),
+      multipart: true,
+    });
+
+    assert.equal(response.status, 503);
+    assert.match(data.message, /active subject teacher/i);
+    assert.equal(requests.size, 0);
+    assert.equal(uploadCount, 0);
+    assert.equal(history.length, 0);
+  });
+
+  it('rejects an invalid routed approver before creating or uploading', async () => {
+    workflowService.routeNewRequest = async () => ({
+      approver: { isActive: true },
+      stage: 'teacher',
+    });
+    const { response, data } = await send('/requests', {
+      user: users.get('student-1'),
+      method: 'POST',
+      body: makeFormData(createSubmissionBody('attendance_correction'), 1),
+      multipart: true,
+    });
+
+    assert.equal(response.status, 503);
+    assert.match(data.message, /active subject teacher/i);
+    assert.equal(requests.size, 0);
+    assert.equal(uploadCount, 0);
+    assert.equal(history.length, 0);
   });
 
   it('cleans uploaded files and removes the request when submission fails', async () => {

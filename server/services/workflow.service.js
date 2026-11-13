@@ -99,6 +99,22 @@ const findDean = async () => {
   return User.findOne({ role: 'dean', isActive: true });
 };
 
+const requireInitialApprover = (approver, stage) => {
+  const stageLabels = {
+    teacher: 'subject teacher',
+    coordinator: 'Class Coordinator',
+    mentor: 'Mentor',
+    hod: 'HOD',
+    dean: 'Dean',
+  };
+  if (!approver || !approver._id || approver.isActive !== true) {
+    throw createWorkflowError(
+      `No active ${stageLabels[stage] || stage} is available to review this request. Contact the administrator before proceeding.`
+    );
+  }
+  return approver;
+};
+
 const getMedicalLeaveApprover = async (stage, requester) => {
   const { branch, year, section } = requester;
   let approver;
@@ -183,12 +199,12 @@ const routeNewRequest = async (request, requester) => {
 
   if (requestType === 'attendance_correction') {
     approver = await findTeacherForSubject(subject, rb, ry, rs);
+    if (approver) stage = approver.role;
     if (!approver) {
       // Fallback to HOD
       approver = await findHOD(rd || department);
       stage = 'hod';
     }
-    stage = approver ? approver.role : 'hod';
   } else if (requestType === 'event_attendance') {
     approver = await findTeacherForSubject(request.subject || '', rb, ry, rs);
     if (approver) {
@@ -212,8 +228,11 @@ const routeNewRequest = async (request, requester) => {
       approver = await findDean();
       stage = 'dean';
     }
+  } else {
+    throw createWorkflowError(`Unsupported request type: ${requestType}.`, 400);
   }
 
+  approver = requireInitialApprover(approver, stage);
   return { approver, stage };
 };
 

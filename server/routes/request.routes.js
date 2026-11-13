@@ -156,23 +156,35 @@ router.post('/', protect, authorize('student'), upload.array('files', 5), async 
     }
     requestData.description = description.trim();
 
-    // Resolve the mandatory first medical stage before creating the request or uploading files.
+    // Resolve the initial approver before creating the request or uploading files.
     let route;
     try {
       route = await workflowService.routeNewRequest(requestData, requester);
     } catch (error) {
-      if (requestType !== 'medical_leave') throw error;
-      return sendError(res, error.statusCode || 503, error.message);
+      if (error.statusCode) {
+        return sendError(res, error.statusCode, error.message);
+      }
+      return next(error);
     }
 
-    const { approver, stage } = route;
-    if (approver) {
-      requestData.currentApproverId = approver._id;
-      requestData.currentApprovalStage = stage;
-      requestData.status = 'under_review';
-    } else {
-      requestData.currentApprovalStage = stage;
+    const { approver, stage } = route || {};
+    if (!approver || !approver._id || approver.isActive !== true || !stage) {
+      const stageLabels = {
+        teacher: 'subject teacher',
+        coordinator: 'Class Coordinator',
+        mentor: 'Mentor',
+        hod: 'HOD',
+        dean: 'Dean',
+      };
+      return sendError(
+        res,
+        503,
+        `No active ${stageLabels[stage] || 'approver'} is available to review this request. Contact the administrator before proceeding.`
+      );
     }
+    requestData.currentApproverId = approver._id;
+    requestData.currentApprovalStage = stage;
+    requestData.status = 'under_review';
 
     const request = await Request.create(requestData);
     const fileIds = [];

@@ -8,6 +8,177 @@ const { sendSuccess, sendError } = require('../utils/apiResponse');
 
 router.use(protect, authorize('admin'));
 
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const isValidClassAssignment = (assignment) =>
+  Boolean(
+    assignment &&
+      typeof assignment === 'object' &&
+      typeof assignment.branch === 'string' &&
+      assignment.branch.trim() &&
+      Number.isInteger(Number(assignment.year)) &&
+      Number(assignment.year) >= 1 &&
+      Number(assignment.year) <= 4 &&
+      typeof assignment.section === 'string' &&
+      assignment.section.trim()
+  );
+
+const assignmentKey = (assignment) =>
+  `${assignment.branch.trim()}|${Number(assignment.year)}|${assignment.section.trim()}`;
+
+const validateAssignments = async (candidate, existingUserId) => {
+  const {
+    role,
+    assignedSubjects = [],
+    assignedClass = null,
+    mentoringClasses = [],
+    headOfDepartments = [],
+    isActive = true,
+  } = candidate;
+
+  if (!Array.isArray(assignedSubjects)) return 'Subject assignments must be a list.';
+  if (!Array.isArray(mentoringClasses)) return 'Mentor assignments must be a list.';
+  if (!Array.isArray(headOfDepartments)) return 'HOD departments must be a list.';
+
+  if (assignedClass !== null && !isValidClassAssignment(assignedClass)) {
+    return 'Coordinator assignment requires a branch, year (1-4), and section.';
+  }
+  if (role === 'coordinator' && !assignedClass) {
+    return 'A Class Coordinator must be assigned to a class.';
+  }
+  if (assignedClass && !['teacher', 'coordinator'].includes(role)) {
+    return 'Only teachers and coordinators can have a coordinator class assignment.';
+  }
+
+  for (const assignment of mentoringClasses) {
+    if (!isValidClassAssignment(assignment)) {
+      return 'Each mentor assignment requires a branch, year (1-4), and section.';
+    }
+  }
+  if (role === 'mentor' && mentoringClasses.length === 0) {
+    return 'A Mentor must be assigned to at least one class.';
+  }
+  if (mentoringClasses.length > 0 && !['teacher', 'mentor'].includes(role)) {
+    return 'Only teachers and mentors can have mentor class assignments.';
+  }
+
+  for (const assignment of assignedSubjects) {
+    if (
+      !assignment ||
+      typeof assignment.subjectName !== 'string' ||
+      !assignment.subjectName.trim() ||
+      !isValidClassAssignment(assignment)
+    ) {
+      return 'Each subject assignment requires a subject, branch, year (1-4), and section.';
+    }
+  }
+  if (assignedSubjects.length > 0 && ['student', 'admin'].includes(role)) {
+    return 'Only academic staff can have subject assignments.';
+  }
+
+  if (
+    headOfDepartments.some(
+      (department) => typeof department !== 'string' || !department.trim()
+    )
+  ) {
+    return 'HOD departments must contain non-empty department names.';
+  }
+  if (role === 'hod' && headOfDepartments.length === 0) {
+    return 'An HOD must be assigned to at least one department.';
+  }
+  if (headOfDepartments.length > 0 && role !== 'hod') {
+    return 'Only HOD accounts can have department assignments.';
+  }
+
+  const subjectKeys = assignedSubjects.map(
+    (assignment) =>
+      `${assignment.subjectName.trim().toLowerCase()}|${assignmentKey(assignment)}`
+  );
+  const classKeys = mentoringClasses.map(assignmentKey);
+  if (new Set(subjectKeys).size !== subjectKeys.length) {
+    return 'Duplicate subject assignments are not allowed.';
+  }
+  if (new Set(classKeys).size !== classKeys.length) {
+    return 'Duplicate mentor class assignments are not allowed.';
+  }
+
+  if (isActive === false) return null;
+
+  const existingFilter = existingUserId ? { _id: { $ne: existingUserId } } : {};
+  const conflicts = [];
+  if (assignedClass) {
+    conflicts.push([
+      {
+        role: { $in: ['teacher', 'coordinator'] },
+        isActive: true,
+        assignedClass: {
+          branch: assignedClass.branch.trim(),
+          year: Number(assignedClass.year),
+          section: assignedClass.section.trim(),
+        },
+        ...existingFilter,
+      },
+      'This class already has an active Class Coordinator.',
+    ]);
+  }
+  if (mentoringClasses.length > 0) {
+    conflicts.push([
+      {
+        role: { $in: ['teacher', 'mentor'] },
+        isActive: true,
+        $or: mentoringClasses.map(({ branch, year, section }) => ({
+          mentoringClasses: {
+            $elemMatch: {
+              branch: branch.trim(),
+              year: Number(year),
+              section: section.trim(),
+            },
+          },
+        })),
+        ...existingFilter,
+      },
+      'One or more classes already have an active Mentor.',
+    ]);
+  }
+  if (headOfDepartments.length > 0) {
+    conflicts.push([
+      {
+        role: 'hod',
+        isActive: true,
+        headOfDepartments: { $in: headOfDepartments.map((department) => department.trim()) },
+        ...existingFilter,
+      },
+      'One or more departments already have an active HOD.',
+    ]);
+  }
+  for (const assignment of assignedSubjects) {
+    conflicts.push([
+      {
+        role: { $in: ['teacher', 'coordinator', 'mentor', 'hod', 'dean'] },
+        isActive: true,
+        assignedSubjects: {
+          $elemMatch: {
+            subjectName: {
+              $regex: `^${escapeRegex(assignment.subjectName.trim())}$`,
+              $options: 'i',
+            },
+            branch: assignment.branch.trim(),
+            year: Number(assignment.year),
+            section: assignment.section.trim(),
+          },
+        },
+        ...existingFilter,
+      },
+      `The subject ${assignment.subjectName.trim()} already has an active teacher for this class.`,
+    ]);
+  }
+
+  for (const [filter, message] of conflicts) {
+    if (await User.findOne(filter)) return message;
+  }
+  return null;
+};
+
 router.get('/stats', async (req, res, next) => {
   try {
     const [totalUsers, students, totalRequests, pendingRequests] = await Promise.all([
@@ -80,6 +251,15 @@ router.post('/users', async (req, res, next) => {
       return sendError(res, 400, `Invalid role. Allowed: ${allowedRoles.join(', ')}.`);
     }
 
+    const assignmentError = await validateAssignments({
+      role,
+      assignedSubjects,
+      assignedClass,
+      mentoringClasses,
+      headOfDepartments,
+    });
+    if (assignmentError) return sendError(res, 400, assignmentError);
+
     const existing = await User.findOne({ email: String(email || '').toLowerCase() });
     if (existing) return sendError(res, 409, 'An account with this email already exists.');
 
@@ -123,13 +303,42 @@ router.put('/users/:id', async (req, res, next) => {
     const user = await User.findById(req.params.id);
     if (!user) return sendError(res, 404, 'User not found.');
     const allowedRoles = ['teacher', 'coordinator', 'mentor', 'hod', 'dean', 'student'];
-    if (role && !allowedRoles.includes(role) && !(role === 'admin' && user.role === 'admin')) {
+    if (
+      role !== undefined &&
+      !allowedRoles.includes(role) &&
+      !(role === 'admin' && user.role === 'admin')
+    ) {
       return sendError(res, 400, `Invalid role. Allowed: ${allowedRoles.join(', ')}.`);
     }
 
     if (email && email.toLowerCase() !== user.email) {
       const existing = await User.findOne({ email: email.toLowerCase() });
       if (existing) return sendError(res, 409, 'An account with this email already exists.');
+    }
+
+    const assignmentFields = [
+      'role',
+      'assignedSubjects',
+      'assignedClass',
+      'mentoringClasses',
+      'headOfDepartments',
+    ];
+    if (assignmentFields.some((field) => Object.prototype.hasOwnProperty.call(req.body, field))) {
+      const assignmentError = await validateAssignments(
+        {
+          role: role === undefined ? user.role : role,
+          assignedSubjects:
+            assignedSubjects === undefined ? user.assignedSubjects : assignedSubjects,
+          assignedClass: assignedClass === undefined ? user.assignedClass : assignedClass,
+          mentoringClasses:
+            mentoringClasses === undefined ? user.mentoringClasses : mentoringClasses,
+          headOfDepartments:
+            headOfDepartments === undefined ? user.headOfDepartments : headOfDepartments,
+          isActive: user.isActive,
+        },
+        user._id
+      );
+      if (assignmentError) return sendError(res, 400, assignmentError);
     }
 
     if (name !== undefined) user.name = name;
@@ -160,6 +369,21 @@ router.patch('/users/:id/status', async (req, res, next) => {
     if (!user) return sendError(res, 404, 'User not found.');
     if (user.role === 'admin') {
       return sendError(res, 403, 'Cannot deactivate admin accounts through this endpoint.');
+    }
+
+    if (!user.isActive) {
+      const assignmentError = await validateAssignments(
+        {
+          role: user.role,
+          assignedSubjects: user.assignedSubjects,
+          assignedClass: user.assignedClass,
+          mentoringClasses: user.mentoringClasses,
+          headOfDepartments: user.headOfDepartments,
+          isActive: true,
+        },
+        user._id
+      );
+      if (assignmentError) return sendError(res, 400, assignmentError);
     }
 
     user.isActive = !user.isActive;

@@ -11,6 +11,7 @@ const FileRecord = require('../models/FileRecord');
 const storageService = require('../services/storage.service');
 const workflowService = require('../services/workflow.service');
 const errorHandler = require('../middleware/error.middleware');
+const notificationRoutes = require('../routes/notification.routes');
 
 const JWT_SECRET = 'request-lifecycle-isolated-test-secret';
 const originalJwtSecret = process.env.JWT_SECRET;
@@ -18,6 +19,7 @@ const realWorkflow = { ...workflowService };
 const users = new Map();
 const requests = new Map();
 const fileRecords = new Map();
+let notifications = [];
 let history = [];
 let server;
 let baseUrl;
@@ -134,7 +136,20 @@ const matchesFilter = (request, filter = {}) => {
   ) {
     return false;
   }
-  if (filter.status && request.status !== filter.status) return false;
+  if (
+    filter.currentApproverId &&
+    request.currentApproverId?.toString() !== filter.currentApproverId.toString()
+  ) {
+    return false;
+  }
+  if (
+    filter.status &&
+    (filter.status.$in
+      ? !filter.status.$in.includes(request.status)
+      : request.status !== filter.status)
+  ) {
+    return false;
+  }
   if (filter.requestType && request.requestType !== filter.requestType) return false;
   if (
     filter.$or &&
@@ -262,7 +277,66 @@ const installRouteMocks = () => {
         entry.actorId.toString() === actorId.toString()
     );
   ApprovalHistory.find = () => queryFor(history);
-  Notification.create = async () => ({});
+  Notification.create = async (data) => {
+    const notification = {
+      ...data,
+      _id: `notification-${notifications.length + 1}`,
+      isRead: false,
+      createdAt: new Date(),
+    };
+    notifications.push(notification);
+    return notification;
+  };
+  Notification.find = (filter) => {
+    let result = notifications.filter(
+      (notification) => notification.userId.toString() === filter.userId.toString()
+    );
+    const query = {
+      sort() {
+        return this;
+      },
+      skip(amount) {
+        result = result.slice(amount);
+        return this;
+      },
+      limit(amount) {
+        result = result.slice(0, amount);
+        return this;
+      },
+      then(resolve, reject) {
+        return Promise.resolve(result).then(resolve, reject);
+      },
+    };
+    return query;
+  };
+  Notification.countDocuments = async (filter) =>
+    notifications.filter(
+      (notification) =>
+        notification.userId.toString() === filter.userId.toString() &&
+        (filter.isRead === undefined || notification.isRead === filter.isRead)
+    ).length;
+  Notification.findOneAndUpdate = async (filter, update) => {
+    const notification = notifications.find(
+      (item) =>
+        item._id === String(filter._id) &&
+        item.userId.toString() === filter.userId.toString()
+    );
+    if (notification) Object.assign(notification, update);
+    return notification || null;
+  };
+  Notification.updateMany = async (filter, update) => {
+    let modifiedCount = 0;
+    for (const notification of notifications) {
+      if (
+        notification.userId.toString() === filter.userId.toString() &&
+        (filter.isRead === undefined || notification.isRead === filter.isRead)
+      ) {
+        Object.assign(notification, update);
+        modifiedCount += 1;
+      }
+    }
+    return { modifiedCount };
+  };
 
   uploadImplementation = async () => {
     uploadCount += 1;
@@ -316,6 +390,7 @@ describe('request lifecycle routes and workflow', () => {
     app.use(express.json());
     app.use('/api/requests', requestRoutes);
     app.use('/api/files', fileRoutes);
+    app.use('/api/notifications', notificationRoutes);
     app.use(errorHandler);
     server = app.listen(0, '127.0.0.1');
     await new Promise((resolve, reject) => {
@@ -329,6 +404,7 @@ describe('request lifecycle routes and workflow', () => {
     users.clear();
     requests.clear();
     fileRecords.clear();
+    notifications = [];
     history = [];
     nextRequestId = 0;
     uploadCount = 0;
@@ -438,6 +514,22 @@ describe('request lifecycle routes and workflow', () => {
     assert.equal(requests.size, 0);
   });
 
+  it('rejects a malformed target department before routing or creating a request', async () => {
+    const { response, data } = await send('/requests', {
+      user: users.get('student-1'),
+      method: 'POST',
+      body: {
+        ...createSubmissionBody('other_grievance'),
+        targetDepartment: { name: 'Target Department' },
+      },
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(data.message, /targetDepartment must be a department name/i);
+    assert.equal(requests.size, 0);
+    assert.equal(notifications.length, 0);
+  });
+
   it('requires a medical document and does not upload when it is missing', async () => {
     const { response, data } = await send('/requests', {
       user: users.get('student-1'),
@@ -523,6 +615,7 @@ describe('request lifecycle routes and workflow', () => {
     assert.match(data.message, /Class Coordinator/i);
     assert.equal(requests.size, 0);
     assert.equal(uploadCount, 0);
+    assert.equal(notifications.length, 0);
   });
 
   for (const [type, unavailableRole] of [
@@ -549,6 +642,7 @@ describe('request lifecycle routes and workflow', () => {
       assert.equal(requests.size, 0);
       assert.equal(uploadCount, 0);
       assert.equal(history.length, 0);
+      assert.equal(notifications.length, 0);
     });
   }
 
@@ -569,6 +663,7 @@ describe('request lifecycle routes and workflow', () => {
     assert.equal(requests.size, 0);
     assert.equal(uploadCount, 0);
     assert.equal(history.length, 0);
+    assert.equal(notifications.length, 0);
   });
 
   it('rejects an invalid routed approver before creating or uploading', async () => {
@@ -603,6 +698,38 @@ describe('request lifecycle routes and workflow', () => {
     assert.equal(requests.size, 0);
     assert.deepEqual(deletedFiles, ['file-1']);
     assert.equal(history.length, 0);
+    assert.equal(notifications.length, 0);
+  });
+
+  it('notifies only the student and routed staff after a request is created', async () => {
+    const { response, data } = await send('/requests', {
+      user: users.get('student-1'),
+      method: 'POST',
+      body: makeFormData(createSubmissionBody('event_attendance')),
+      multipart: true,
+    });
+
+    assert.equal(response.status, 201);
+    assert.deepEqual(
+      notifications.map(({ userId, requestId, type }) => ({
+        userId: userId.toString(),
+        requestId: requestId.toString(),
+        type,
+      })),
+      [
+        {
+          userId: 'student-1',
+          requestId: data.request._id,
+          type: 'request_submitted',
+        },
+        {
+          userId: 'teacher-1',
+          requestId: data.request._id,
+          type: 'request_assigned',
+        },
+      ]
+    );
+    assert.equal(notifications.length, 2);
   });
 
   it('prevents students from viewing another student’s request and history', async () => {
@@ -635,6 +762,28 @@ describe('request lifecycle routes and workflow', () => {
     assert.ok(!staffList.data.requests.some((request) => request._id === unrelated._id));
   });
 
+  it('counts staff action items only while they are the current approver', async () => {
+    const assigned = seedRequest({ currentApproverId: 'teacher-1' });
+    const previouslyActed = seedRequest({ currentApproverId: 'teacher-2' });
+    history.push({
+      requestId: previouslyActed._id,
+      actorId: 'teacher-1',
+      action: 'forwarded',
+    });
+
+    const stats = await send('/requests/stats', { user: users.get('teacher-1') });
+    assert.equal(stats.data.stats.total, 2);
+    assert.equal(stats.data.stats.under_review, 1);
+
+    const actionable = await send('/requests?actionable=true&limit=6', {
+      user: users.get('teacher-1'),
+    });
+    assert.deepEqual(
+      actionable.data.requests.map((request) => request._id),
+      [assigned._id]
+    );
+  });
+
   it('prevents staff without current assignment or prior action from viewing request or history', async () => {
     const request = seedRequest({ requesterId: 'student-2', currentApproverId: 'teacher-2' });
     for (const path of [`/requests/${request._id}`, `/requests/${request._id}/history`]) {
@@ -650,6 +799,52 @@ describe('request lifecycle routes and workflow', () => {
       user: users.get('teacher-1'),
     });
     assert.equal(response.status, 200);
+  });
+
+  it('limits notification lists, unread counts, and read updates to their owner', async () => {
+    notifications.push(
+      { _id: 'student-1-notification', userId: 'student-1', isRead: false, message: 'Own.' },
+      { _id: 'student-2-notification', userId: 'student-2', isRead: false, message: 'Private.' }
+    );
+
+    const list = await send('/notifications', { user: users.get('student-1') });
+    assert.deepEqual(
+      list.data.notifications.map((notification) => notification._id),
+      ['student-1-notification']
+    );
+    assert.equal(list.data.unreadCount, 1);
+
+    const denied = await send('/notifications/student-2-notification/read', {
+      user: users.get('student-1'),
+      method: 'PATCH',
+    });
+    assert.equal(denied.response.status, 404);
+    assert.equal(notifications[1].isRead, false);
+
+    const marked = await send('/notifications/student-1-notification/read', {
+      user: users.get('student-1'),
+      method: 'PATCH',
+    });
+    assert.equal(marked.response.status, 200);
+    assert.equal(notifications[0].isRead, true);
+
+    const updatedList = await send('/notifications', { user: users.get('student-1') });
+    assert.equal(updatedList.data.unreadCount, 0);
+  });
+
+  it('marks all and only the authenticated user’s notifications as read', async () => {
+    notifications.push(
+      { _id: 'student-1-unread', userId: 'student-1', isRead: false, message: 'Own.' },
+      { _id: 'student-2-unread', userId: 'student-2', isRead: false, message: 'Private.' }
+    );
+    const result = await send('/notifications/read-all', {
+      user: users.get('student-1'),
+      method: 'PATCH',
+    });
+
+    assert.equal(result.response.status, 200);
+    assert.equal(notifications[0].isRead, true);
+    assert.equal(notifications[1].isRead, false);
   });
 
   it('restricts file access to owners, assigned/acting staff, and admins', async () => {
@@ -702,6 +897,25 @@ describe('request lifecycle routes and workflow', () => {
       body: { remarks: 'Reviewed.' },
     });
     assert.equal(response.status, 403);
+  });
+
+  it('denies workflow actions to students and admins even if a request points to their account', async () => {
+    workflowService.processApprove = realWorkflow.processApprove;
+
+    for (const actor of [users.get('student-1'), users.get('admin-1')]) {
+      const request = seedRequest({
+        currentApproverId: actor._id,
+        currentApprovalStage: 'teacher',
+      });
+      const { response } = await send(`/requests/${request._id}/approve`, {
+        user: actor,
+        method: 'PUT',
+        body: { remarks: 'Attempted approval.' },
+      });
+
+      assert.equal(response.status, 403);
+      assert.equal(request.status, 'under_review');
+    }
   });
 
   for (const action of ['reject', 'return']) {
@@ -908,6 +1122,126 @@ describe('request lifecycle routes and workflow', () => {
     assert.equal(history.length, historyCount);
   });
 
+  it('does not route requests to an HOD from an unrelated department', async () => {
+    User.findOne = async (filter) => {
+      if (filter.role === 'hod' && !filter.headOfDepartments) {
+        return makeUser('unassigned-hod', 'hod');
+      }
+      return null;
+    };
+
+    await assert.rejects(
+      realWorkflow.routeNewRequest(
+        { requestType: 'attendance_correction', subject: 'Test Subject' },
+        users.get('student-1')
+      ),
+      /No active HOD is available/
+    );
+  });
+
+  it('routes grievances to the selected target department HOD', async () => {
+    const targetHod = makeUser('target-hod', 'hod', {
+      headOfDepartments: ['Target Department'],
+    });
+    let requestedDepartments;
+    User.findOne = async (filter) => {
+      if (filter.role === 'hod') {
+        requestedDepartments = filter.headOfDepartments.$in;
+        return requestedDepartments.includes('Target Department') ? targetHod : null;
+      }
+      return null;
+    };
+
+    const route = await realWorkflow.routeNewRequest(
+      { requestType: 'other_grievance', targetDepartment: 'Target Department' },
+      users.get('student-1')
+    );
+    assert.deepEqual(requestedDepartments, ['Target Department']);
+    assert.equal(route.approver._id, targetHod._id);
+    assert.equal(route.stage, 'hod');
+  });
+
+  it('resubmits a grievance to the HOD for its saved target department', async () => {
+    const student = users.get('student-1');
+    const targetHod = makeUser('target-hod', 'hod', {
+      headOfDepartments: ['Target Department'],
+    });
+    User.findOne = async (filter) => {
+      if (
+        filter.role === 'hod' &&
+        filter.headOfDepartments.$in.includes('Target Department')
+      ) {
+        return targetHod;
+      }
+      return null;
+    };
+    const request = makeDocument({
+      requesterId: student._id,
+      requestType: 'other_grievance',
+      targetDepartment: 'Target Department',
+      status: 'returned',
+      currentApprovalStage: 'hod',
+      currentApproverId: 'old-hod',
+      description: 'A sufficiently detailed request explanation.',
+    });
+
+    await realWorkflow.processResubmit(request, student, {
+      description: 'A corrected and sufficiently detailed explanation.',
+    });
+
+    assert.equal(request.currentApprovalStage, 'hod');
+    assert.equal(request.currentApproverId.toString(), targetHod._id);
+  });
+
+  it('does not assign new requests to inactive staff', async () => {
+    let coordinatorFilter;
+    User.findOne = async (filter) => {
+      if (filter.role?.$in?.includes('coordinator')) {
+        coordinatorFilter = filter;
+        return null;
+      }
+      return null;
+    };
+
+    await assert.rejects(
+      realWorkflow.routeNewRequest({ requestType: 'medical_leave' }, users.get('student-1')),
+      /No active Class Coordinator is assigned/
+    );
+    assert.equal(coordinatorFilter.isActive, true);
+  });
+
+  it('does not route Event Attendance with no subject to an arbitrary subject teacher or Dean', async () => {
+    const coordinator = makeUser('coordinator-1', 'coordinator');
+    let subjectLookupCount = 0;
+    User.findOne = async (filter) => {
+      if (filter.assignedSubjects) {
+        subjectLookupCount += 1;
+        return makeUser('subject-teacher', 'teacher');
+      }
+      if (filter.role?.$in?.includes('coordinator')) return coordinator;
+      if (filter.role === 'dean') return makeUser('dean-1', 'dean');
+      return null;
+    };
+
+    const route = await realWorkflow.routeNewRequest(
+      { requestType: 'event_attendance', eventName: 'Campus Event' },
+      users.get('student-1')
+    );
+    assert.equal(subjectLookupCount, 0);
+    assert.equal(route.approver._id, coordinator._id);
+    assert.equal(route.stage, 'coordinator');
+
+    User.findOne = async (filter) =>
+      filter.role === 'dean' ? makeUser('dean-1', 'dean') : null;
+    await assert.rejects(
+      realWorkflow.routeNewRequest(
+        { requestType: 'event_attendance', eventName: 'Campus Event' },
+        users.get('student-1')
+      ),
+      /No active HOD is available/
+    );
+  });
+
   it('does not skip a medical stage when its next approver is unavailable', async () => {
     const student = users.get('student-1');
     const coordinator = makeUser('teacher-1', 'teacher');
@@ -929,6 +1263,105 @@ describe('request lifecycle routes and workflow', () => {
     assert.equal(request.status, 'under_review');
     assert.equal(request.currentApprovalStage, 'coordinator');
     assert.equal(history.length, historyCount);
+  });
+
+  it('notifies the correct recipients for each medical workflow event', async () => {
+    const student = users.get('student-1');
+    const coordinator = makeUser('coordinator-1', 'coordinator');
+    const mentor = makeUser('mentor-1', 'mentor');
+    const dean = makeUser('dean-1', 'dean');
+    User.findOne = async (filter) => {
+      if (filter.role?.$in?.includes('coordinator')) return coordinator;
+      if (filter.role?.$in?.includes('mentor')) return mentor;
+      if (filter.role === 'hod') return makeUser('hod-1', 'hod');
+      if (filter.role === 'dean') return dean;
+      return null;
+    };
+    const makeMedicalRequest = (stage, approver, status = 'under_review') =>
+      makeDocument({
+        requesterId: student._id,
+        requestType: 'medical_leave',
+        status,
+        currentApprovalStage: stage,
+        currentApproverId: approver._id,
+        description: 'A sufficiently detailed request explanation.',
+      });
+
+    const forwarded = makeMedicalRequest('coordinator', coordinator);
+    await realWorkflow.processApprove(forwarded, coordinator, 'Forwarding notes.');
+    assert.deepEqual(
+      notifications.map(({ userId, type }) => [userId.toString(), type]),
+      [
+        ['student-1', 'request_forwarded'],
+        ['mentor-1', 'request_assigned'],
+      ]
+    );
+    assert.ok(notifications.every((notification) => !Object.hasOwn(notification, 'attachments')));
+
+    notifications = [];
+    const rejected = makeMedicalRequest('coordinator', coordinator);
+    await realWorkflow.processReject(rejected, coordinator, 'Rejected notes.');
+    assert.deepEqual(
+      notifications.map(({ userId, type }) => [userId.toString(), type]),
+      [['student-1', 'request_rejected']]
+    );
+
+    notifications = [];
+    const returned = makeMedicalRequest('coordinator', coordinator);
+    await realWorkflow.processReturn(returned, coordinator, 'Correction notes.');
+    assert.deepEqual(
+      notifications.map(({ userId, type }) => [userId.toString(), type]),
+      [['student-1', 'request_returned']]
+    );
+
+    notifications = [];
+    const resubmitted = makeMedicalRequest('coordinator', coordinator, 'returned');
+    await realWorkflow.processResubmit(resubmitted, student, {
+      description: 'A corrected and sufficiently detailed explanation.',
+    });
+    assert.deepEqual(
+      notifications.map(({ userId, type }) => [userId.toString(), type]),
+      [
+        ['coordinator-1', 'request_assigned'],
+        ['student-1', 'request_resubmitted'],
+      ]
+    );
+
+    notifications = [];
+    const finallyApproved = makeMedicalRequest('dean', dean);
+    await realWorkflow.processApprove(finallyApproved, dean, 'Final approval.');
+    assert.equal(finallyApproved.status, 'approved');
+    assert.deepEqual(
+      notifications.map(({ userId, type }) => [userId.toString(), type]),
+      [['student-1', 'request_approved']]
+    );
+  });
+
+  it('does not undo a successful workflow action when notification storage fails', async () => {
+    const approver = users.get('teacher-1');
+    const request = makeDocument({
+      requesterId: 'student-1',
+      requestType: 'attendance_correction',
+      status: 'under_review',
+      currentApprovalStage: 'teacher',
+      currentApproverId: approver._id,
+    });
+    const originalCreate = Notification.create;
+    const originalConsoleError = console.error;
+    Notification.create = async () => {
+      throw new Error('Mock notification failure.');
+    };
+    console.error = () => {};
+
+    try {
+      await realWorkflow.processReject(request, approver, 'Rejected notes.');
+    } finally {
+      Notification.create = originalCreate;
+      console.error = originalConsoleError;
+    }
+
+    assert.equal(request.status, 'rejected');
+    assert.equal(history.at(-1).action, 'rejected');
   });
 
   it('records forward, approve, reject, and return history with correct actors, stages and remarks', async () => {

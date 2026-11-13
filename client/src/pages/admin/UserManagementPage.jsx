@@ -160,8 +160,8 @@ export default function UserManagementPage() {
 
       // Role-specific assignments
       if (formData.role === 'teacher') {
-        if (formData.assignedSubjectName) {
-          payload.assignedSubjects = [
+        payload.assignedSubjects = formData.assignedSubjectName
+          ? [
             {
               subjectName: formData.assignedSubjectName,
               subjectCode: formData.assignedSubjectCode,
@@ -169,8 +169,8 @@ export default function UserManagementPage() {
               year: Number(formData.assignedClassYear),
               section: formData.assignedClassSection,
             },
-          ];
-        }
+          ]
+          : [];
         if (formData.isClassCoordinator) {
           payload.assignedClass = {
             branch: formData.coordinatorBranch,
@@ -196,6 +196,13 @@ export default function UserManagementPage() {
         ];
       } else if (formData.role === 'hod') {
         payload.headOfDepartments = [formData.department];
+      }
+
+      if (editingUser && editingUser.role !== formData.role) {
+        payload.assignedSubjects ??= [];
+        payload.assignedClass ??= null;
+        payload.mentoringClasses ??= [];
+        payload.headOfDepartments ??= [];
       }
 
       if (editingUser) {

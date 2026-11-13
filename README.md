@@ -8,7 +8,7 @@
 
 **CampusFlow** is a college-project MVP built to digitize student administrative and academic requests. It replaces manual paper forms and in-person coordination with an online request and review workflow.
 
-Students can submit requests online with supporting documentation, monitor approval stages, view faculty remarks, and receive in-app notifications. Teachers, Class Coordinators, Mentors, Heads of Department (HODs), the Dean, and College Administrators have role-aware dashboards to review, approve, reject, or return requests for correction.
+Students can submit requests online with supporting documentation, monitor approval stages, view faculty remarks, and receive in-app notifications. Staff dashboards show requests assigned to the current staff member and requests on which they have acted. Administrators can inspect requests system-wide but cannot approve, reject, or return them.
 
 **MongoDB Atlas** stores all application data and document metadata. **Cloudinary** stores actual uploaded document contents using authenticated (private) delivery — documents are never publicly accessible.
 
@@ -241,17 +241,19 @@ The system implements 7 strictly separated roles:
 | Role | Responsibilities & Permissions |
 |------|-------------------------------|
 | **Student** | Self-registers via public signup. Submits requests, uploads documents, tracks live progress, reviews remarks, and resubmits returned requests. Can only access own requests and documents. |
-| **Teacher** | Reviews attendance correction & event attendance requests assigned to their subjects/classes. Can Approve, Reject (remarks mandatory), or Return for correction. Can access documents for assigned requests. |
+| **Teacher** | Reviews requests assigned to their subjects. A teacher with an explicit `assignedClass` also serves as that class's Coordinator; the assignment is distinct from subject teaching. Can act only when currently assigned to the request's stage. |
 | **Class Coordinator** | Stage 1 approver for Medical Leave for their assigned class section. Can Approve (forwards to Mentor), Reject, or Return. Can access medical documents for assigned requests. |
 | **Mentor** | Stage 2 approver for Medical Leave for their mentored classes. Can Approve (forwards to HOD), Reject, or Return. Can access medical documents for assigned requests. |
-| **HOD** | Stage 3 approver for Medical Leave (forwards to Dean). Also receives Departmental Academic Grievances. Can access relevant documents. |
+| **HOD** | Stage 3 approver for Medical Leave (forwards to Dean). Receives departmental requests only when assigned to the requester's department. Can access relevant documents. |
 | **Dean** | Final Stage 4 authority for Medical Leave approvals. Approves or Rejects with institutional remarks. Can access forwarded documents. |
-| **Admin** | Configures staff accounts, role assignments, department/subject allocations, and monitors system-wide activity. Cannot skip or alter approval audit history. Document access limited to associated requests. |
+| **Admin** | Configures staff accounts, role assignments, department/subject allocations, and monitors system-wide activity. Can inspect all requests but cannot take approval actions, skip a stage, or alter approval audit history. |
 
 ### Critical Security Rule
 - **Public registration ALWAYS creates a Student account.** The role is hardcoded on the backend.
 - Staff accounts cannot be registered publicly; they must be created by an Admin.
 - Initial Admin access is created via an explicit seed script.
+- Request lists and details are scoped server-side: students see their own requests; staff see current assignments and requests on which they acted; Admins have read-only system-wide request visibility.
+- Admin assignment writes are validated on the backend. Active Coordinator, Mentor, HOD, and subject assignments must be structurally valid and cannot conflict with another active assignment for the same class, department, or subject/class.
 
 ---
 
@@ -260,12 +262,14 @@ The system implements 7 strictly separated roles:
 ### A. Attendance Correction Workflow
 1. Student submits subject, attendance date, and lecture period.
 2. The backend dynamically finds the designated faculty assigned to that Subject, Branch, Year, and Section.
-3. The assigned teacher approves or rejects the request. Status transitions to `Approved` or `Rejected`.
+3. If no subject teacher is assigned, the request routes only to an HOD assigned to the student's department; if neither exists, submission fails with an assignment error.
+4. Only the current approver with a role permitted for that stage may approve, reject, or return the request.
 
 ### B. Event Attendance Workflow
 1. Student provides event name, date, details, and optional evidence.
-2. Routed to the designated faculty or class coordinator.
-3. Once approved, the record is finalized and credit is logged.
+2. Routed to a matching subject teacher when a subject is provided; otherwise it routes to the class Coordinator, then to the student's department HOD if needed.
+3. Event Attendance does not fall back to the Dean. If no eligible staff assignment exists, submission fails.
+4. Once approved, the record is finalized and credit is logged.
 
 ### C. Medical Leave Sequential Approval Chain
 Medical leave enforces a non-bypassable 4-stage sequence:
@@ -302,6 +306,9 @@ Medical leave enforces a non-bypassable 4-stage sequence:
 
 - If **Returned for Correction**, the student can edit the description and add documents. When resubmitted, the request returns to the exact stage that requested the correction without erasing previous history.
 - Every action writes an immutable record to `ApprovalHistory` containing actor ID, name, role, action, previous stage, next stage, timestamp, and remarks.
+
+### D. Other Academic Grievance
+The request routes to the HOD assigned to its selected target department; if no target department is supplied, the student's department (or branch) is used. If no matching HOD is available, the existing Dean fallback applies. Resubmission returns to the original review stage and department.
 
 ---
 
@@ -471,6 +478,8 @@ This verification does not load `server/.env`, use demo accounts, or contact Clo
 - `GET /api/notifications` — Fetch user's notification list and unread count
 - `PATCH /api/notifications/:id/read` — Mark notification as read
 - `PATCH /api/notifications/read-all` — Mark all notifications as read
+
+Notifications are stored per recipient and cover request assignment, forwarding, rejection, return, resubmission, and completion. Users can list and mark only their own notifications as read; notifications contain request references and messages, not document contents.
 
 ---
 

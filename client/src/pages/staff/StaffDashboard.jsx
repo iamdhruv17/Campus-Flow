@@ -18,18 +18,21 @@ export default function StaffDashboard() {
   const { user } = useAuth();
   const [stats, setStats] = useState(null);
   const [assignedRequests, setAssignedRequests] = useState([]);
+  const [pendingActionRequests, setPendingActionRequests] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [statsRes, reqRes] = await Promise.all([
+        const [statsRes, reqRes, actionableRes] = await Promise.all([
           requestService.getStats(),
           requestService.getAll({ limit: 6 }),
+          requestService.getAll({ limit: 6, actionable: true }),
         ]);
         setStats(statsRes.data.stats);
         setAssignedRequests(reqRes.data.requests);
+        setPendingActionRequests(actionableRes.data.requests);
       } catch (err) {
         toast.error(getErrorMessage(err));
       } finally {
@@ -40,13 +43,7 @@ export default function StaffDashboard() {
   }, []);
 
   if (loading) return <LoadingSpinner text="Loading staff dashboard..." />;
-
-  // Filter requests that are currently waiting for this approver's action
-  const pendingActionRequests = assignedRequests.filter(
-    (r) =>
-      ['pending', 'under_review'].includes(r.status) &&
-      (r.currentApproverId?._id === user?._id || r.currentApproverId === user?._id)
-  );
+  const actionableCount = (stats?.pending ?? 0) + (stats?.under_review ?? 0);
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-8">
@@ -103,10 +100,10 @@ export default function StaffDashboard() {
             <AlertCircle size={18} className="text-amber-500" />
             <h2 className="section-title text-base">Requests Awaiting Your Action</h2>
           </div>
-          <span className="badge-pending">{pendingActionRequests.length} pending</span>
+          <span className="badge-pending">{actionableCount} pending</span>
         </div>
 
-        {pendingActionRequests.length === 0 ? (
+        {actionableCount === 0 ? (
           <div className="text-center py-10 bg-slate-50/50 rounded-lg border border-dashed border-slate-200">
             <CheckCircle size={32} className="text-emerald-500 mx-auto mb-2" />
             <p className="text-sm font-semibold text-slate-700">All caught up!</p>

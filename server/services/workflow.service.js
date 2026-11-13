@@ -29,16 +29,24 @@ const createWorkflowError = (message, statusCode = 503) => {
 const sameId = (left, right) =>
   left && right && left.toString() === right.toString();
 
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /**
  * Find teacher assigned to a subject for a given student.
  */
 const findTeacherForSubject = async (subjectName, branch, year, section, roles) => {
+  const normalizedSubject = typeof subjectName === 'string' ? subjectName.trim() : '';
+  if (!normalizedSubject) return null;
+
   const teacher = await User.findOne({
     role: { $in: roles || ['teacher', 'coordinator', 'mentor', 'hod', 'dean'] },
     isActive: true,
     assignedSubjects: {
       $elemMatch: {
-        subjectName: { $regex: new RegExp(subjectName, 'i') },
+        subjectName: {
+          $regex: `^${escapeRegex(normalizedSubject)}$`,
+          $options: 'i',
+        },
         branch,
         year: Number(year),
         section,
@@ -80,17 +88,21 @@ const findMentor = async (branch, year, section) => {
 /**
  * Find HOD for a department.
  */
-const findHOD = async (department, requireDepartmentAssignment = false) => {
-  const hod = await User.findOne({
+const findHOD = async (department) => {
+  if (typeof department !== 'string' || !department.trim()) return null;
+  return User.findOne({
     role: 'hod',
     isActive: true,
-    headOfDepartments: { $in: [department] },
+    headOfDepartments: { $in: [department.trim()] },
   });
-  if (!hod && !requireDepartmentAssignment) {
-    return User.findOne({ role: 'hod', isActive: true });
-  }
-  return hod;
 };
+
+const getHodDepartment = (request, requester) =>
+  request.requestType === 'other_grievance' &&
+  typeof request.targetDepartment === 'string' &&
+  request.targetDepartment.trim()
+    ? request.targetDepartment.trim()
+    : requester.department || requester.branch;
 
 /**
  * Find the Dean.
@@ -127,7 +139,7 @@ const getMedicalLeaveApprover = async (stage, requester) => {
     approver = await findMentor(branch, year, section);
     roleLabel = 'Mentor';
   } else if (stage === 'hod') {
-    approver = await findHOD(requester.department || branch, true);
+    approver = await findHOD(requester.department || branch);
     roleLabel = 'HOD assigned to the student department';
   } else if (stage === 'dean') {
     approver = await findDean();
@@ -191,7 +203,7 @@ const assertMedicalLeaveApprover = (request, actor, requester) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const routeNewRequest = async (request, requester) => {
-  const { requestType, subject, branch, year, section, department } = request;
+  const { requestType, subject, branch, year, section } = request;
   const { branch: rb, year: ry, section: rs, department: rd } = requester;
 
   let approver = null;
@@ -202,11 +214,11 @@ const routeNewRequest = async (request, requester) => {
     if (approver) stage = approver.role;
     if (!approver) {
       // Fallback to HOD
-      approver = await findHOD(rd || department);
+      approver = await findHOD(rd || rb);
       stage = 'hod';
     }
   } else if (requestType === 'event_attendance') {
-    approver = await findTeacherForSubject(request.subject || '', rb, ry, rs);
+    approver = await findTeacherForSubject(request.subject, rb, ry, rs);
     if (approver) {
       stage = approver.role;
     }
@@ -215,14 +227,16 @@ const routeNewRequest = async (request, requester) => {
       stage = 'coordinator';
     }
     if (!approver) {
-      approver = await findHOD(rd || department);
+      approver = await findHOD(rd || rb);
       stage = 'hod';
     }
   } else if (requestType === 'medical_leave') {
     approver = await getMedicalLeaveApprover('coordinator', requester);
     stage = 'coordinator';
   } else if (requestType === 'other_grievance') {
-    approver = await findHOD(rd || department);
+    const targetDepartment =
+      typeof request.targetDepartment === 'string' ? request.targetDepartment.trim() : '';
+    approver = await findHOD(targetDepartment || rd || rb);
     stage = 'hod';
     if (!approver) {
       approver = await findDean();
@@ -280,7 +294,7 @@ const getApproverForStage = async (stage, request, requester) => {
   } else if (stage === 'mentor') {
     approver = await findMentor(branch, year, section);
   } else if (stage === 'hod') {
-    approver = await findHOD(requester.department || branch);
+    approver = await findHOD(getHodDepartment(request, requester));
   } else if (stage === 'dean') {
     approver = await findDean();
   } else {
@@ -314,6 +328,20 @@ const assertActionableAndAssigned = (request, actor) => {
     !sameId(request.currentApproverId, actor._id)
   ) {
     throw createWorkflowError('You are not the active assigned approver for this request.', 403);
+  }
+
+  const rolesByStage = {
+    teacher: ['teacher'],
+    coordinator: ['teacher', 'coordinator'],
+    mentor: ['teacher', 'mentor'],
+    hod: ['hod'],
+    dean: ['dean'],
+  };
+  if (!rolesByStage[request.currentApprovalStage]?.includes(actor.role)) {
+    throw createWorkflowError(
+      `Your role is not permitted to act at the ${request.currentApprovalStage} stage.`,
+      403
+    );
   }
 };
 

@@ -152,7 +152,17 @@ export default function RequestDetailPage() {
   const isCurrentApprover =
     request.currentApproverId &&
     (request.currentApproverId?._id === user._id || request.currentApproverId === user._id);
-  const canAct = isCurrentApprover && ['pending', 'under_review'].includes(request.status);
+  const allowedRolesByStage = {
+    teacher: ['teacher'],
+    coordinator: ['teacher', 'coordinator'],
+    mentor: ['teacher', 'mentor'],
+    hod: ['hod'],
+    dean: ['dean'],
+  };
+  const canAct =
+    isCurrentApprover &&
+    allowedRolesByStage[request.currentApprovalStage]?.includes(user.role) &&
+    ['pending', 'under_review'].includes(request.status);
   const canResubmit = isOwner && request.status === 'returned';
 
   return (

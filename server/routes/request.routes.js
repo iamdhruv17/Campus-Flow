@@ -51,6 +51,14 @@ const validateRequestFields = (requestType, fields) => {
       return `${field} is required for this request type.`;
     }
   }
+  if (
+    requestType === 'other_grievance' &&
+    fields.targetDepartment !== undefined &&
+    fields.targetDepartment !== null &&
+    typeof fields.targetDepartment !== 'string'
+  ) {
+    return 'targetDepartment must be a department name.';
+  }
 
   const requiredDates = {
     attendance_correction: ['attendanceDate'],
@@ -88,6 +96,7 @@ const requestFieldsByType = {
 router.get('/stats', protect, async (req, res, next) => {
   try {
     let matchFilter = {};
+    const isStaff = !['student', 'admin'].includes(req.user.role);
 
     if (req.user.role === 'student') {
       matchFilter.requesterId = req.user._id;
@@ -105,11 +114,17 @@ router.get('/stats', protect, async (req, res, next) => {
 
     const [total, pending, approved, rejected, returned, under_review] = await Promise.all([
       Request.countDocuments(matchFilter),
-      Request.countDocuments({ ...matchFilter, status: 'pending' }),
+      Request.countDocuments({
+        ...(isStaff ? { currentApproverId: req.user._id } : matchFilter),
+        status: 'pending',
+      }),
       Request.countDocuments({ ...matchFilter, status: 'approved' }),
       Request.countDocuments({ ...matchFilter, status: 'rejected' }),
       Request.countDocuments({ ...matchFilter, status: 'returned' }),
-      Request.countDocuments({ ...matchFilter, status: 'under_review' }),
+      Request.countDocuments({
+        ...(isStaff ? { currentApproverId: req.user._id } : matchFilter),
+        status: 'under_review',
+      }),
     ]);
 
     sendSuccess(res, 200, 'Stats retrieved.', {
@@ -242,9 +257,18 @@ router.get('/', protect, async (req, res, next) => {
     const { status, requestType, page = 1, limit = 10, search } = req.query;
     const pageNumber = Math.max(1, Number(page) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(limit) || 10));
+    const actionableOnly = req.query.actionable === 'true';
+    if (actionableOnly && ['student', 'admin'].includes(req.user.role)) {
+      return sendError(res, 403, 'Only assigned staff can request actionable items.');
+    }
     const filter = {};
 
-    if (req.user.role === 'student') {
+    if (actionableOnly) {
+      filter.currentApproverId = req.user._id;
+      filter.status = ['pending', 'under_review'].includes(status)
+        ? status
+        : { $in: ['pending', 'under_review'] };
+    } else if (req.user.role === 'student') {
       filter.requesterId = req.user._id;
     } else if (req.user.role !== 'admin') {
       const historicalIds = await ApprovalHistory.distinct('requestId', {
@@ -256,7 +280,7 @@ router.get('/', protect, async (req, res, next) => {
       ];
     }
 
-    if (status) filter.status = status;
+    if (status && !actionableOnly) filter.status = status;
     if (requestType) filter.requestType = requestType;
     if (search) {
       const escapedSearch = String(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

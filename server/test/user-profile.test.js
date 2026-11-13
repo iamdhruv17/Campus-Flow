@@ -9,6 +9,8 @@ const adminRoutes = require('../routes/admin.routes');
 const testSecret = 'campusflow-profile-route-test-secret';
 const originalJwtSecret = process.env.JWT_SECRET;
 let originalFindById;
+let originalFindOne;
+let originalCreate;
 let server;
 let user;
 let baseUrl;
@@ -64,8 +66,18 @@ describe('profile update security', () => {
   beforeEach(async () => {
     process.env.JWT_SECRET = testSecret;
     originalFindById = User.findById;
+    originalFindOne = User.findOne;
+    originalCreate = User.create;
     user = createUser();
     User.findById = (id) => makeQuery(String(id) === user._id ? user : null);
+    User.findOne = async () => null;
+    User.create = async (data) => ({
+      ...data,
+      _id: 'created-user',
+      toPublicProfile() {
+        return { ...this };
+      },
+    });
 
     const app = express();
     app.use(express.json());
@@ -81,6 +93,8 @@ describe('profile update security', () => {
 
   afterEach(async () => {
     User.findById = originalFindById;
+    User.findOne = originalFindOne;
+    User.create = originalCreate;
     if (originalJwtSecret === undefined) {
       delete process.env.JWT_SECRET;
     } else {
@@ -195,5 +209,100 @@ describe('profile update security', () => {
     assert.equal(target.year, 3);
     assert.equal(target.section, 'C');
     assert.equal(data.user.branch, 'Updated Branch');
+  });
+
+  it('rejects coordinator, mentor, and HOD accounts without valid assignments', async () => {
+    const admin = createUser('admin');
+    admin._id = 'assignment-admin';
+    User.findById = (id) =>
+      makeQuery(String(id) === admin._id ? admin : user);
+
+    for (const [role, message] of [
+      ['coordinator', /must be assigned to a class/i],
+      ['mentor', /must be assigned to at least one class/i],
+      ['hod', /must be assigned to at least one department/i],
+    ]) {
+      const { response, data } = await send('/admin/users', {
+        method: 'POST',
+        body: {
+          name: 'New Staff',
+          email: `${role}@example.invalid`,
+          password: 'valid-password',
+          role,
+        },
+        token: tokenFor('admin', admin._id),
+      });
+
+      assert.equal(response.status, 400);
+      assert.match(data.message, message);
+    }
+  });
+
+  it('rejects malformed or conflicting class assignments from the admin API', async () => {
+    const admin = createUser('admin');
+    admin._id = 'assignment-admin';
+    User.findById = (id) =>
+      makeQuery(String(id) === admin._id ? admin : user);
+
+    const baseBody = {
+      name: 'New Coordinator',
+      email: 'coordinator@example.invalid',
+      password: 'valid-password',
+      role: 'coordinator',
+    };
+    const invalidAssignment = await send('/admin/users', {
+      method: 'POST',
+      body: { ...baseBody, assignedClass: { branch: 'CSE', year: 7, section: 'A' } },
+      token: tokenFor('admin', admin._id),
+    });
+    assert.equal(invalidAssignment.response.status, 400);
+    assert.match(invalidAssignment.data.message, /year \(1-4\)/i);
+
+    User.findOne = async (filter) =>
+      filter.assignedClass ? { _id: 'existing-coordinator' } : null;
+    const conflictingAssignment = await send('/admin/users', {
+      method: 'POST',
+      body: {
+        ...baseBody,
+        email: 'conflicting-coordinator@example.invalid',
+        assignedClass: { branch: 'CSE', year: 3, section: 'A' },
+      },
+      token: tokenFor('admin', admin._id),
+    });
+    assert.equal(conflictingAssignment.response.status, 400);
+    assert.match(conflictingAssignment.data.message, /already has an active Class Coordinator/i);
+  });
+
+  it('validates assignment updates and prevents conflicting staff activation', async () => {
+    const admin = createUser('admin');
+    admin._id = 'assignment-admin';
+    User.findById = (id) =>
+      makeQuery(String(id) === admin._id ? admin : user);
+    user.role = 'teacher';
+    user.assignedClass = null;
+    user.assignedSubjects = [];
+    user.mentoringClasses = [];
+    user.headOfDepartments = [];
+
+    const invalidUpdate = await send('/admin/users/profile-test-user', {
+      body: { assignedClass: { branch: 'CSE', year: 0, section: 'A' } },
+      token: tokenFor('admin', admin._id),
+    });
+    assert.equal(invalidUpdate.response.status, 400);
+    assert.match(invalidUpdate.data.message, /year \(1-4\)/i);
+    assert.equal(user.saveCount, undefined);
+
+    user.role = 'coordinator';
+    user.assignedClass = { branch: 'CSE', year: 3, section: 'A' };
+    user.isActive = false;
+    User.findOne = async (filter) =>
+      filter.assignedClass ? { _id: 'existing-coordinator' } : null;
+    const activation = await send('/admin/users/profile-test-user/status', {
+      method: 'PATCH',
+      token: tokenFor('admin', admin._id),
+    });
+    assert.equal(activation.response.status, 400);
+    assert.match(activation.data.message, /already has an active Class Coordinator/i);
+    assert.equal(user.isActive, false);
   });
 });

@@ -123,10 +123,10 @@ export default function AdminDashboard() {
           Requests are routed dynamically using faculty assignments:
         </p>
         <ul className="text-xs text-slate-400 mt-3 space-y-1.5 list-disc list-inside">
-          <li><strong>Attendance Correction:</strong> Routed directly to the teacher assigned to that Subject, Branch, Year, and Section.</li>
-          <li><strong>Event Attendance:</strong> Routed to the designated Subject Teacher or Class Coordinator.</li>
+          <li><strong>Attendance Correction:</strong> Routed to the assigned subject teacher, then the student's department HOD if needed.</li>
+          <li><strong>Event Attendance:</strong> Routed to the matching Subject Teacher, Class Coordinator, then department HOD. No Dean fallback.</li>
           <li><strong>Medical Leave (4-Stage Chain):</strong> Class Coordinator → Mentor → HOD → Dean. No stage can be skipped.</li>
-          <li><strong>Academic Grievance:</strong> Routed directly to the Department HOD with Dean escalation.</li>
+          <li><strong>Academic Grievance:</strong> Routed to the selected target department HOD, with the existing Dean fallback.</li>
         </ul>
       </div>
     </div>

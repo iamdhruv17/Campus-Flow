@@ -1,20 +1,6 @@
 const mongoose = require('mongoose');
 
-/**
- * FileRecord — stores Cloudinary asset identifiers and document metadata.
- *
- * What is stored:
- *   - Stable Cloudinary identifiers (asset_id, public_id) for retrieval/deletion
- *   - Uploader and request linkage
- *   - Original filename, MIME type, size, format
- *
- * What is NOT stored:
- *   - Actual document contents
- *   - Base64 encoded data
- *   - API secrets
- *   - Permanent public document URLs
- *   - Temporary signed URLs (generated on-demand, never persisted)
- */
+
 const fileRecordSchema = new mongoose.Schema(
   {
     uploaderId: {

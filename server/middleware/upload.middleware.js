@@ -5,7 +5,6 @@ const ALLOWED_MIME_TYPES = ['application/pdf', 'image/jpeg', 'image/jpg', 'image
 const ALLOWED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png'];
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 
-// Use memory storage — files are held in buffer and uploaded to Cloudinary via the server-side SDK
 const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {

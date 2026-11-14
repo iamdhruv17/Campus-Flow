@@ -46,7 +46,7 @@ router.put('/profile', protect, async (req, res, next) => {
       return sendError(res, 400, 'Only your name and password can be updated through the profile endpoint.');
     }
 
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.user._id).select('+tokenVersion');
     if (!user) return sendError(res, 404, 'User not found.');
 
     if (body.name !== undefined) user.name = body.name;

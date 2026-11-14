@@ -104,7 +104,12 @@ const logout = (req, res) => {
 // GET /api/auth/me
 const getMe = async (req, res, next) => {
   try {
-    sendSuccess(res, 200, 'User retrieved.', { user: req.user });
+    const user = typeof req.user.toPublicProfile === 'function'
+      ? req.user.toPublicProfile()
+      : req.user;
+    delete user.passwordHash;
+    delete user.tokenVersion;
+    sendSuccess(res, 200, 'User retrieved.', { user });
   } catch (error) {
     next(error);
   }

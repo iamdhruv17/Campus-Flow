@@ -115,6 +115,7 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
 userSchema.methods.toPublicProfile = function () {
   const obj = this.toObject();
   delete obj.passwordHash;
+  delete obj.tokenVersion;
   return obj;
 };
 

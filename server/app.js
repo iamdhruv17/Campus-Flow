@@ -15,13 +15,18 @@ const errorHandler = require('./middleware/error.middleware');
 
 const app = express();
 
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 // Security headers
 app.use(helmet());
 
 // CORS — only allow the configured frontend origin
-const allowedOrigins = [
-  process.env.FRONTEND_URL || 'http://localhost:5173',
-];
+const allowedOrigins =
+  process.env.NODE_ENV === 'production'
+    ? [process.env.FRONTEND_URL].filter(Boolean)
+    : [process.env.FRONTEND_URL || 'http://localhost:5173'];
 app.use(
   cors({
     origin: (origin, callback) => {

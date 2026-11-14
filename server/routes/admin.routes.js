@@ -300,7 +300,7 @@ router.put('/users/:id', async (req, res, next) => {
       name, email, role, department, branch, year, section, rollNumber,
       assignedSubjects, assignedClass, mentoringClasses, headOfDepartments, password,
     } = req.body;
-    const user = await User.findById(req.params.id);
+    const user = await User.findById(req.params.id).select('+tokenVersion');
     if (!user) return sendError(res, 404, 'User not found.');
     const allowedRoles = ['teacher', 'coordinator', 'mentor', 'hod', 'dean', 'student'];
     if (

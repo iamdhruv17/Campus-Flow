@@ -46,8 +46,12 @@ const makeQuery = (result) => ({
   then: (resolve, reject) => Promise.resolve(result).then(resolve, reject),
 });
 
-const tokenFor = (role = user.role, id = user._id) =>
-  jwt.sign({ id, role }, testSecret);
+const tokenFor = (
+  role = user.role,
+  id = user._id,
+  tokenVersion = id === user._id ? user.tokenVersion || 0 : 0
+) =>
+  jwt.sign({ id, role, tokenVersion }, testSecret);
 
 const send = async (path, { method = 'PUT', body, token } = {}) => {
   const headers = {};
@@ -176,6 +180,30 @@ describe('profile update security', () => {
     assert.equal(data.success, true);
   });
 
+  it('increments the existing token version across repeated profile password changes', async () => {
+    const first = await send('/users/profile', {
+      body: {
+        currentPassword: 'correct-current-password',
+        newPassword: 'new-password',
+      },
+      token: tokenFor(),
+    });
+    assert.equal(first.response.status, 200);
+    assert.equal(user.tokenVersion, 1);
+
+    user.comparePassword = async (candidate) => candidate === 'new-password';
+    const second = await send('/users/profile', {
+      body: {
+        currentPassword: 'new-password',
+        newPassword: 'newer-password',
+      },
+      token: tokenFor(),
+    });
+    assert.equal(second.response.status, 200);
+    assert.equal(user.passwordHash, 'newer-password');
+    assert.equal(user.tokenVersion, 2);
+  });
+
   it('rejects an incorrect current password', async () => {
     const { response, data } = await send('/users/profile', {
       body: { currentPassword: 'incorrect', newPassword: 'new-password' },
@@ -210,6 +238,27 @@ describe('profile update security', () => {
     assert.equal(target.year, 3);
     assert.equal(target.section, 'C');
     assert.equal(data.user.branch, 'Updated Branch');
+  });
+
+  it('increments the existing token version across repeated admin password changes', async () => {
+    const admin = createUser('admin');
+    admin._id = 'admin-password-user';
+    user.tokenVersion = 4;
+    User.findById = (id) => makeQuery(String(id) === admin._id ? admin : user);
+
+    const first = await send('/admin/users/profile-test-user', {
+      body: { password: 'admin-password-one' },
+      token: tokenFor('admin', admin._id),
+    });
+    assert.equal(first.response.status, 200);
+    assert.equal(user.tokenVersion, 5);
+
+    const second = await send('/admin/users/profile-test-user', {
+      body: { password: 'admin-password-two' },
+      token: tokenFor('admin', admin._id),
+    });
+    assert.equal(second.response.status, 200);
+    assert.equal(user.tokenVersion, 6);
   });
 
   it('rejects coordinator, mentor, and HOD accounts without valid assignments', async () => {

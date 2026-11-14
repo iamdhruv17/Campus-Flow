@@ -34,7 +34,11 @@ const protect = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Session expired. Please log in again.' });
     }
 
-    req.user = user;
+    const authenticatedUser =
+      typeof user.toObject === 'function' ? user.toObject() : { ...user };
+    delete authenticatedUser.passwordHash;
+    delete authenticatedUser.tokenVersion;
+    req.user = authenticatedUser;
     next();
   } catch (error) {
     if (error.name === 'JsonWebTokenError') {

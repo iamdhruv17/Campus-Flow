@@ -1,7 +1,5 @@
 import api from './api';
 
-const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
-
 export const userService = {
   getAll: (params) => api.get('/admin/users', { params }),
   getById: (id) => api.get(`/admin/users/${id}`),
@@ -20,7 +18,10 @@ export const notificationService = {
 };
 
 export const fileService = {
-  getPreviewUrl: (id) => `${API_BASE}/files/${id}/preview`,
+  getPreview: (id) => api.get(`/files/${id}/preview`, {
+    responseType: 'blob',
+    skipAuthRedirect: true,
+  }),
   /**
    * Requests a time-limited signed Cloudinary download URL from the backend.
    * Returns JSON: { signedUrl, expiresAt, fileName, mimeType, fileSize }

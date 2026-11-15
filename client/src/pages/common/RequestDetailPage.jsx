@@ -39,6 +39,7 @@ export default function RequestDetailPage() {
   // Resubmit fields
   const [resubmitDescription, setResubmitDescription] = useState('');
   const [resubmitFiles, setResubmitFiles] = useState([]);
+  const [previewingFileId, setPreviewingFileId] = useState(null);
 
   const fetchRequestDetails = useCallback(async () => {
     setLoading(true);
@@ -62,8 +63,43 @@ export default function RequestDetailPage() {
     fetchRequestDetails();
   }, [fetchRequestDetails]);
 
-  const handlePreviewFile = (fileId) => {
-    window.open(fileService.getPreviewUrl(fileId), '_blank', 'noopener,noreferrer');
+  const handlePreviewFile = async (fileId) => {
+    const previewWindow = window.open('', '_blank');
+    if (!previewWindow) {
+      toast.error('Please allow pop-ups to preview this document.');
+      return;
+    }
+
+    previewWindow.opener = null;
+    setPreviewingFileId(fileId);
+    let objectUrl;
+    try {
+      const response = await fileService.getPreview(fileId);
+      if (previewWindow.closed) {
+        throw new Error('The preview tab was closed before the document loaded.');
+      }
+
+      const contentType = response.headers['content-type'] || response.data.type;
+      const blob = new Blob([response.data], { type: contentType });
+      objectUrl = URL.createObjectURL(blob);
+      previewWindow.location.replace(objectUrl);
+
+      // Keep the URL alive while the browser viewer consumes it, then release it.
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+    } catch (err) {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (!previewWindow.closed) previewWindow.close();
+      const status = err.response?.status;
+      const message =
+        status === 401
+          ? 'Your session has expired. Please sign in again.'
+          : status === 403
+            ? 'You are not authorized to view this document.'
+            : getErrorMessage(err);
+      toast.error(message);
+    } finally {
+      setPreviewingFileId(null);
+    }
   };
 
   const handleWorkflowAction = async () => {
@@ -305,11 +341,12 @@ export default function RequestDetailPage() {
                     </div>
                     <button
                       onClick={() => handlePreviewFile(att._id)}
+                      disabled={previewingFileId === att._id}
                       className="btn-secondary btn-sm px-2.5 py-1 text-xs ml-2 flex items-center gap-1"
                       title="Open Document"
                     >
                       <Download size={13} />
-                      View
+                      {previewingFileId === att._id ? 'Opening...' : 'View'}
                     </button>
                   </div>
                 ))}

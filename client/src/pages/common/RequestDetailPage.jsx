@@ -62,17 +62,8 @@ export default function RequestDetailPage() {
     fetchRequestDetails();
   }, [fetchRequestDetails]);
 
-  const handleDownloadFile = async (fileId) => {
-    try {
-      // Backend performs authorization check and returns a time-limited signed URL
-      const res = await fileService.getSignedUrl(fileId);
-      const signedUrl = res.data.signedUrl || res.data.data?.signedUrl;
-      if (!signedUrl) throw new Error('Could not retrieve download link.');
-      // Open the signed URL directly — no binary data passes through the browser
-      window.open(signedUrl, '_blank', 'noopener,noreferrer');
-    } catch (err) {
-      toast.error(getErrorMessage(err));
-    }
+  const handlePreviewFile = (fileId) => {
+    window.open(fileService.getPreviewUrl(fileId), '_blank', 'noopener,noreferrer');
   };
 
   const handleWorkflowAction = async () => {
@@ -313,7 +304,7 @@ export default function RequestDetailPage() {
                       </div>
                     </div>
                     <button
-                      onClick={() => handleDownloadFile(att._id)}
+                      onClick={() => handlePreviewFile(att._id)}
                       className="btn-secondary btn-sm px-2.5 py-1 text-xs ml-2 flex items-center gap-1"
                       title="Open Document"
                     >

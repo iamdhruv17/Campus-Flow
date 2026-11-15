@@ -13,6 +13,7 @@
  */
 
 const { v4: uuidv4 } = require('uuid');
+const { Readable } = require('stream');
 const { cloudinary, isCloudinaryConfigured } = require('../config/cloudinary');
 const FileRecord = require('../models/FileRecord');
 
@@ -260,6 +261,41 @@ const generateSignedDownloadUrl = (fileRecord) => {
   return { signedUrl, expiresAt };
 };
 
+/**
+ * Fetches an authenticated Cloudinary download on the server.
+ *
+ * private_download_url is intentionally used only as an upstream URL here.
+ * Cloudinary's download endpoint may return a generated download filename for
+ * raw assets; the preview controller replaces that with safe inline headers.
+ */
+const fetchAuthenticatedFile = async (fileRecord) => {
+  const { signedUrl } = generateSignedDownloadUrl(fileRecord);
+
+  let upstreamResponse;
+  try {
+    upstreamResponse = await fetch(signedUrl);
+  } catch (error) {
+    const fetchError = new Error('Unable to retrieve the document from storage.');
+    fetchError.statusCode = 502;
+    fetchError.cause = error;
+    throw fetchError;
+  }
+
+  if (!upstreamResponse.ok || !upstreamResponse.body) {
+    const upstreamError = new Error(
+      upstreamResponse.status === 404
+        ? 'Document is no longer available in storage.'
+        : 'Document storage returned an error.'
+    );
+    upstreamError.statusCode = upstreamResponse.status === 404 ? 404 : 502;
+    throw upstreamError;
+  }
+
+  return typeof Readable.fromWeb === 'function' && typeof upstreamResponse.body.getReader === 'function'
+    ? Readable.fromWeb(upstreamResponse.body)
+    : upstreamResponse.body;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Deletion
 // ─────────────────────────────────────────────────────────────────────────────
@@ -316,6 +352,7 @@ module.exports = {
   validateFileBuffer,
   uploadFile,
   generateSignedDownloadUrl,
+  fetchAuthenticatedFile,
   deleteFileRecord,
   tryDeleteFileRecord,
 };

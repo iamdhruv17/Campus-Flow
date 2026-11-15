@@ -136,11 +136,11 @@ export default function MyRequestsPage() {
           title="No requests match your criteria"
           message="Try adjusting filters or submit a new request."
           icon={FileText}
-          action={
+          action={user?.role === 'student' && (
             <Link to="/requests/new" className="btn-primary btn-sm">
               Submit New Request
             </Link>
-          }
+          )}
         />
       ) : (
         <div className="space-y-3">

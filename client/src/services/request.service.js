@@ -20,6 +20,8 @@ export const requestService = {
 
   returnForCorrection: (id, data) => api.put(`/requests/${id}/return`, data),
 
+  escalate: (id, data) => api.put(`/requests/${id}/escalate`, data),
+
   resubmit: (id, formData) =>
     api.put(`/requests/${id}/resubmit`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },

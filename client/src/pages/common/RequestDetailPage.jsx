@@ -32,7 +32,7 @@ export default function RequestDetailPage() {
   const [error, setError] = useState(null);
 
   // Approval Action Modals
-  const [actionType, setActionType] = useState(null); // 'approve' | 'reject' | 'return' | 'resubmit'
+  const [actionType, setActionType] = useState(null); // 'approve' | 'reject' | 'return' | 'escalate' | 'resubmit'
   const [remarks, setRemarks] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
 
@@ -103,7 +103,7 @@ export default function RequestDetailPage() {
   };
 
   const handleWorkflowAction = async () => {
-    if ((actionType === 'reject' || actionType === 'return') && !remarks.trim()) {
+    if (['reject', 'return', 'escalate'].includes(actionType) && !remarks.trim()) {
       toast.error('Remarks are required for this action.');
       return;
     }
@@ -119,6 +119,9 @@ export default function RequestDetailPage() {
       } else if (actionType === 'return') {
         await requestService.returnForCorrection(id, { remarks });
         toast.success('Request returned for correction.');
+      } else if (actionType === 'escalate') {
+        await requestService.escalate(id, { remarks });
+        toast.success('Grievance escalated to the HOD.');
       }
       setActionType(null);
       setRemarks('');
@@ -190,6 +193,10 @@ export default function RequestDetailPage() {
     isCurrentApprover &&
     allowedRolesByStage[request.currentApprovalStage]?.includes(user.role) &&
     ['pending', 'under_review'].includes(request.status);
+  const canEscalate =
+    canAct &&
+    request.requestType === 'other_grievance' &&
+    request.currentApprovalStage === 'coordinator';
   const canResubmit = isOwner && request.status === 'returned';
 
   return (
@@ -358,6 +365,13 @@ export default function RequestDetailPage() {
         {/* Action Buttons for Approver / Student */}
         {canAct && (
           <div className="mt-8 pt-5 border-t border-slate-200 flex flex-wrap gap-3 justify-end bg-indigo-50/40 -mx-6 -mb-6 p-6 rounded-b-xl">
+            {canEscalate && <button
+              onClick={() => { setActionType('escalate'); setRemarks(''); }}
+              className="btn-primary"
+            >
+              <Send size={15} />
+              Escalate to HOD
+            </button>}
             <button
               onClick={() => { setActionType('return'); setRemarks(''); }}
               className="btn-warning"
@@ -377,7 +391,13 @@ export default function RequestDetailPage() {
               className="btn-success"
             >
               <CheckCircle size={15} />
-              Approve Request
+              {request.requestType === 'other_grievance'
+                ? (request.currentApprovalStage === 'coordinator' ? 'Resolve Grievance' : 'Resolve Grievance')
+                : request.currentApprovalStage === 'hod' || request.currentApprovalStage === 'dean'
+                  ? 'Final Approve'
+                  : request.requestType === 'event_attendance' || request.requestType === 'medical_leave'
+                    ? 'Approve & Forward'
+                    : 'Approve Request'}
             </button>
           </div>
         )}
@@ -408,11 +428,13 @@ export default function RequestDetailPage() {
 
       {/* Approver Action Modal (Approve / Reject / Return) */}
       <Modal
-        isOpen={['approve', 'reject', 'return'].includes(actionType)}
+        isOpen={['approve', 'reject', 'return', 'escalate'].includes(actionType)}
         onClose={() => setActionType(null)}
         title={
           actionType === 'approve'
             ? 'Approve Request'
+            : actionType === 'escalate'
+            ? 'Escalate Grievance'
             : actionType === 'reject'
             ? 'Reject Request'
             : 'Return for Correction'
@@ -423,6 +445,8 @@ export default function RequestDetailPage() {
           <p className="text-sm text-slate-600">
             {actionType === 'approve'
               ? 'Are you sure you want to approve this request? It will be marked as approved or forwarded to the next reviewer in the chain.'
+              : actionType === 'escalate'
+              ? 'Provide mandatory remarks explaining why this grievance requires HOD review.'
               : actionType === 'reject'
               ? 'Are you sure you want to reject this request? Rejection ends the approval chain.'
               : 'Return this request back to the student so they can correct details and re-upload supporting documents.'}
@@ -459,12 +483,14 @@ export default function RequestDetailPage() {
               className={
                 actionType === 'approve'
                   ? 'btn-success'
+                  : actionType === 'escalate'
+                  ? 'btn-primary'
                   : actionType === 'reject'
                   ? 'btn-danger'
                   : 'btn-warning'
               }
             >
-              {actionLoading ? 'Processing...' : 'Confirm Action'}
+              {actionLoading ? 'Processing...' : actionType === 'escalate' ? 'Escalate to HOD' : 'Confirm Action'}
             </button>
           </div>
         </div>

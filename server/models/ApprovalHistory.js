@@ -23,7 +23,7 @@ const approvalHistorySchema = new mongoose.Schema(
     },
     action: {
       type: String,
-      enum: ['submitted', 'approved', 'rejected', 'returned', 'resubmitted', 'forwarded'],
+      enum: ['submitted', 'approved', 'rejected', 'returned', 'resubmitted', 'forwarded', 'escalated'],
       required: true,
     },
     remarks: {

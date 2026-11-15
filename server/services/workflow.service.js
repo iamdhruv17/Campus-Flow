@@ -5,10 +5,10 @@
  * No other part of the code should directly modify request.status or
  * request.currentApproverId without going through this service.
  *
- * Medical Leave chain: coordinator → mentor → hod → dean
+ * Medical Leave chain: mentor → dean
  * Attendance Correction: teacher (direct)
- * Event Attendance: teacher (direct)
- * Other Grievance: configurable (defaults to hod)
+ * Event Attendance: coordinator → hod
+ * Other Grievance: coordinator, optionally escalated to hod
  */
 
 const Request = require('../models/Request');
@@ -34,12 +34,12 @@ const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /**
  * Find teacher assigned to a subject for a given student.
  */
-const findTeacherForSubject = async (subjectName, branch, year, section, roles) => {
+const findTeacherForSubject = async (subjectName, branch, year, section) => {
   const normalizedSubject = typeof subjectName === 'string' ? subjectName.trim() : '';
   if (!normalizedSubject) return null;
 
   const teacher = await User.findOne({
-    role: { $in: roles || ['teacher', 'coordinator', 'mentor', 'hod', 'dean'] },
+    role: 'teacher',
     isActive: true,
     assignedSubjects: {
       $elemMatch: {
@@ -132,15 +132,9 @@ const getMedicalLeaveApprover = async (stage, requester) => {
   let approver;
   let roleLabel;
 
-  if (stage === 'coordinator') {
-    approver = await findCoordinator(branch, year, section);
-    roleLabel = 'Class Coordinator';
-  } else if (stage === 'mentor') {
+  if (stage === 'mentor') {
     approver = await findMentor(branch, year, section);
     roleLabel = 'Mentor';
-  } else if (stage === 'hod') {
-    approver = await findHOD(requester.department || branch);
-    roleLabel = 'HOD assigned to the student department';
   } else if (stage === 'dean') {
     approver = await findDean();
     roleLabel = 'Dean';
@@ -163,17 +157,17 @@ const assertMedicalLeaveApprover = (request, actor, requester) => {
   const assignedClass = actor.assignedClass;
   let isAssigned = false;
 
+  if (!['mentor', 'dean'].includes(stage)) {
+    throw createWorkflowError(
+      `Legacy medical leave stage "${stage}" cannot continue under the current Mentor -> Dean workflow.`,
+      409
+    );
+  }
   if (actor.isActive === false || !sameId(request.currentApproverId, actor._id)) {
     throw createWorkflowError('You are not the active assigned approver for this request.', 403);
   }
 
-  if (stage === 'coordinator') {
-    isAssigned =
-      ['coordinator', 'teacher'].includes(actor.role) &&
-      assignedClass?.branch === branch &&
-      Number(assignedClass?.year) === Number(year) &&
-      assignedClass?.section === section;
-  } else if (stage === 'mentor') {
+  if (stage === 'mentor') {
     isAssigned =
       ['mentor', 'teacher'].includes(actor.role) &&
       actor.mentoringClasses?.some(
@@ -203,7 +197,7 @@ const assertMedicalLeaveApprover = (request, actor, requester) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const routeNewRequest = async (request, requester) => {
-  const { requestType, subject, branch, year, section } = request;
+  const { requestType, subject } = request;
   const { branch: rb, year: ry, section: rs, department: rd } = requester;
 
   let approver = null;
@@ -211,37 +205,21 @@ const routeNewRequest = async (request, requester) => {
 
   if (requestType === 'attendance_correction') {
     approver = await findTeacherForSubject(subject, rb, ry, rs);
-    if (approver) stage = approver.role;
+    stage = 'teacher';
     if (!approver) {
-      // Fallback to HOD
-      approver = await findHOD(rd || rb);
-      stage = 'hod';
+      throw createWorkflowError(
+        'No subject teacher is assigned for this subject and class. Please contact the administrator.'
+      );
     }
   } else if (requestType === 'event_attendance') {
-    approver = await findTeacherForSubject(request.subject, rb, ry, rs);
-    if (approver) {
-      stage = approver.role;
-    }
-    if (!approver) {
-      approver = await findCoordinator(rb, ry, rs);
-      stage = 'coordinator';
-    }
-    if (!approver) {
-      approver = await findHOD(rd || rb);
-      stage = 'hod';
-    }
-  } else if (requestType === 'medical_leave') {
-    approver = await getMedicalLeaveApprover('coordinator', requester);
+    approver = await findCoordinator(rb, ry, rs);
     stage = 'coordinator';
+  } else if (requestType === 'medical_leave') {
+    approver = await getMedicalLeaveApprover('mentor', requester);
+    stage = 'mentor';
   } else if (requestType === 'other_grievance') {
-    const targetDepartment =
-      typeof request.targetDepartment === 'string' ? request.targetDepartment.trim() : '';
-    approver = await findHOD(targetDepartment || rd || rb);
-    stage = 'hod';
-    if (!approver) {
-      approver = await findDean();
-      stage = 'dean';
-    }
+    approver = await findCoordinator(rb, ry, rs);
+    stage = 'coordinator';
   } else {
     throw createWorkflowError(`Unsupported request type: ${requestType}.`, 400);
   }
@@ -259,11 +237,7 @@ const getNextApproverForMedicalLeave = async (currentStage, requester) => {
     return { approver: null, stage: 'completed' };
   }
 
-  const nextStages = {
-    coordinator: 'mentor',
-    mentor: 'hod',
-    hod: 'dean',
-  };
+  const nextStages = { mentor: 'dean' };
   const nextStage = nextStages[currentStage];
   if (!nextStage) {
     throw createWorkflowError(
@@ -286,8 +260,7 @@ const getApproverForStage = async (stage, request, requester) => {
       request.subject || '',
       branch,
       year,
-      section,
-      ['teacher']
+      section
     );
   } else if (stage === 'coordinator') {
     approver = await findCoordinator(branch, year, section);
@@ -392,16 +365,12 @@ const saveRequestWithHistory = async (request, {
  */
 const processApprove = async (request, actor, remarks) => {
   assertActionableAndAssigned(request, actor);
-  // Fetch the requester to use their class info for routing
   const requester = await User.findById(request.requesterId);
   if (!requester) throw new Error('Requester not found.');
 
   const previousStage = request.currentApprovalStage;
 
   if (request.requestType === 'medical_leave') {
-    if (!['pending', 'under_review'].includes(request.status)) {
-      throw createWorkflowError(`Request is already ${request.status}.`, 409);
-    }
     assertMedicalLeaveApprover(request, actor, requester);
 
     const { approver: nextApprover, stage: nextStage } =
@@ -456,11 +425,52 @@ const processApprove = async (request, actor, remarks) => {
       await notifyApprover(
         nextApprover._id,
         request,
-        `A medical leave request has been assigned to you (forwarded from ${previousStage.toUpperCase()}).`
+        `A Medical Leave request has been forwarded to you by the Mentor.`
       );
     }
+  } else if (request.requestType === 'event_attendance') {
+    if (previousStage === 'coordinator') {
+      const nextApprover = await findHOD(requester.department || requester.branch);
+      requireInitialApprover(nextApprover, 'hod');
+      request.status = 'under_review';
+      request.currentApprovalStage = 'hod';
+      request.currentApproverId = nextApprover._id;
+      await saveRequestWithHistory(request, {
+        requestId: request._id, actorId: actor._id, actorRole: actor.role,
+        actorName: actor.name, action: 'forwarded', remarks, previousStage, nextStage: 'hod',
+      });
+      await notifyStudent(request, 'Your Event Attendance request has been forwarded to the HOD.', 'request_forwarded');
+      await notifyApprover(nextApprover._id, request, 'An Event Attendance request has been forwarded to you for final approval.');
+    } else if (previousStage === 'hod') {
+      request.status = 'approved';
+      request.currentApprovalStage = 'completed';
+      request.currentApproverId = null;
+      request.resolvedAt = new Date();
+      await saveRequestWithHistory(request, {
+        requestId: request._id, actorId: actor._id, actorRole: actor.role,
+        actorName: actor.name, action: 'approved', remarks, previousStage, nextStage: 'completed',
+      });
+      await notifyStudent(request, 'Your Event Attendance request has been finally approved by the HOD.', 'request_approved');
+    } else {
+      throw createWorkflowError(`Cannot advance Event Attendance from "${previousStage}".`, 409);
+    }
+  } else if (request.requestType === 'other_grievance') {
+    request.status = 'approved';
+    request.currentApprovalStage = 'completed';
+    request.currentApproverId = null;
+    request.resolvedAt = new Date();
+    await saveRequestWithHistory(request, {
+      requestId: request._id, actorId: actor._id, actorRole: actor.role,
+      actorName: actor.name, action: 'approved', remarks, previousStage, nextStage: 'completed',
+    });
+    await notifyStudent(
+      request,
+      previousStage === 'coordinator'
+        ? 'Your academic grievance has been resolved by the Class Coordinator.'
+        : 'Your academic grievance has been resolved by the HOD.',
+      'request_approved'
+    );
   } else {
-    // Single-stage workflows (attendance, event, other)
     request.status = 'approved';
     request.currentApprovalStage = 'completed';
     request.currentApproverId = null;
@@ -490,6 +500,35 @@ const processApprove = async (request, actor, remarks) => {
     );
   }
 
+  return request;
+};
+
+const processEscalate = async (request, actor, remarks) => {
+  if (typeof remarks !== 'string' || remarks.trim() === '') {
+    throw createWorkflowError('Remarks are required when escalating a grievance.', 400);
+  }
+  if (request.requestType !== 'other_grievance') {
+    throw createWorkflowError('Only academic grievances can be escalated.', 400);
+  }
+  if (request.status !== 'under_review' || request.currentApprovalStage !== 'coordinator') {
+    throw createWorkflowError('This grievance is not at the Coordinator stage.', 409);
+  }
+  assertActionableAndAssigned(request, actor);
+  const requester = await User.findById(request.requesterId);
+  if (!requester) throw new Error('Requester not found.');
+  const hod = await findHOD(getHodDepartment(request, requester));
+  requireInitialApprover(hod, 'hod');
+
+  request.status = 'under_review';
+  request.currentApprovalStage = 'hod';
+  request.currentApproverId = hod._id;
+  await saveRequestWithHistory(request, {
+    requestId: request._id, actorId: actor._id, actorRole: actor.role,
+    actorName: actor.name, action: 'escalated', remarks: remarks.trim(),
+    previousStage: 'coordinator', nextStage: 'hod',
+  });
+  await notifyApprover(hod._id, request, 'An academic grievance has been escalated to you for review.');
+  await notifyStudent(request, 'Your grievance has been escalated to the HOD for further review.', 'request_escalated');
   return request;
 };
 
@@ -677,6 +716,7 @@ const processResubmit = async (request, requester, updates) => {
 module.exports = {
   routeNewRequest,
   processApprove,
+  processEscalate,
   processReject,
   processReturn,
   processResubmit,

@@ -13,6 +13,7 @@ const {
   approveRequest,
   rejectRequest,
   returnRequest,
+  escalateRequest,
 } = require('../controllers/request.controller');
 
 const REQUEST_TYPES = new Set([
@@ -385,6 +386,7 @@ router.get('/:id', protect, async (req, res, next) => {
 router.put('/:id/approve', protect, approveRequest);
 router.put('/:id/reject', protect, rejectRequest);
 router.put('/:id/return', protect, returnRequest);
+router.put('/:id/escalate', protect, escalateRequest);
 
 router.put('/:id/resubmit', protect, upload.array('files', 5), async (req, res, next) => {
   try {

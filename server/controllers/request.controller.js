@@ -99,4 +99,28 @@ const returnRequest = async (req, res, next) => {
   }
 };
 
-module.exports = { approveRequest, rejectRequest, returnRequest };
+const escalateRequest = async (req, res, next) => {
+  try {
+    const result = await getAssignedRequest(req.params.id, req.user);
+    if (!result) return sendError(res, 404, 'Request not found.');
+    if (result.denied) return sendError(res, 403, 'You are not authorized to escalate this request.');
+    if (result.completed) return sendError(res, 409, `Request is already ${result.request.status}.`);
+    if (typeof req.body?.remarks !== 'string' || req.body.remarks.trim() === '') {
+      return sendError(res, 400, 'Remarks are required when escalating a grievance.');
+    }
+
+    const updated = await workflowService.processEscalate(
+      result.request,
+      req.user,
+      req.body.remarks.trim()
+    );
+    const populated = await Request.findById(updated._id)
+      .populate('requesterId', 'name email')
+      .populate('currentApproverId', 'name role');
+    sendSuccess(res, 200, 'Grievance escalated to the HOD.', { request: populated });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { approveRequest, rejectRequest, returnRequest, escalateRequest };

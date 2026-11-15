@@ -14,7 +14,7 @@ export const REQUEST_STATUSES = {
 };
 
 export const APPROVAL_STAGES = {
-  teacher: 'Teacher',
+  teacher: 'Subject Teacher',
   coordinator: 'Class Coordinator',
   mentor: 'Mentor',
   hod: 'HOD',
@@ -33,7 +33,7 @@ export const ROLES = {
   admin: 'Admin',
 };
 
-export const MEDICAL_LEAVE_STAGES = ['coordinator', 'mentor', 'hod', 'dean'];
+export const MEDICAL_LEAVE_STAGES = ['mentor', 'dean'];
 
 export const BRANCHES = ['CSE', 'ECE', 'ME', 'CE', 'EE', 'IT', 'AIML', 'DS'];
 export const YEARS = [1, 2, 3, 4];

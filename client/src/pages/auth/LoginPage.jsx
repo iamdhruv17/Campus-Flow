@@ -91,13 +91,6 @@ export default function LoginPage() {
             </p>
           </div>
 
-          {/* Demo credentials hint */}
-          <div className="mt-4 p-3 rounded-lg bg-indigo-50 border border-indigo-100">
-            <p className="text-xs font-medium text-indigo-700 mb-1">Demo credentials</p>
-            <p className="text-xs text-indigo-600">All accounts: <code className="font-mono">Demo@1234</code></p>
-            <p className="text-xs text-indigo-600 mt-0.5">Student: <code className="font-mono">arjun.singh@campusflow.edu</code></p>
-            <p className="text-xs text-indigo-600">Admin: <code className="font-mono">admin@campusflow.edu</code></p>
-          </div>
         </div>
       </div>
     </div>

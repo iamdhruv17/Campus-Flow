@@ -140,20 +140,17 @@ export default function LandingPage() {
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Medical leave approval</p>
                   <div className="mt-5 space-y-0">
                     {[
-                      ['Class Coordinator', true],
-                      ['Mentor', true],
-                      ['Head of Department', false],
-                      ['Dean', false],
-                    ].map(([label, complete], index) => (
+                      'Mentor — Initial Review',
+                      'Dean — Final Approval',
+                    ].map((label, index) => (
                       <div key={label} className="flex min-h-14 items-start gap-3">
                         <div className="flex flex-col items-center">
-                          <span className={`flex h-7 w-7 items-center justify-center rounded-full ${complete ? 'bg-indigo-600 text-white' : 'border-2 border-slate-200 bg-white text-slate-400'}`}>
-                            {complete ? <Check size={14} /> : <span className="text-xs font-semibold">{index + 1}</span>}
+                          <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-slate-200 bg-white text-slate-400">
+                            <span className="text-xs font-semibold">{index + 1}</span>
                           </span>
-                          {index < 3 && <span className={`h-7 w-0.5 ${complete ? 'bg-indigo-200' : 'bg-slate-200'}`} />}
+                          {index < 1 && <span className="h-7 w-0.5 bg-slate-200" />}
                         </div>
-                        <p className={`pt-1.5 text-sm font-medium ${complete ? 'text-slate-800' : 'text-slate-400'}`}>{label}</p>
-                        {complete && <span className="ml-auto pt-1.5 text-xs font-medium text-indigo-600">Reviewed</span>}
+                        <p className="pt-1.5 text-sm font-medium text-slate-400">{label}</p>
                       </div>
                     ))}
                   </div>
